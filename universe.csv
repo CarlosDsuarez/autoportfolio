@@ -1,0 +1,48 @@
+ticker,asset_type,sector,name,inclusion_reason
+AAPL,stock,Technology,Apple Inc,Large cap tech leader
+MSFT,stock,Technology,Microsoft Corp,Large cap tech leader
+GOOGL,stock,Communication Services,Alphabet Inc,Mega cap communication
+AMZN,stock,Consumer Discretionary,Amazon.com Inc,Mega cap e-commerce/cloud
+NVDA,stock,Technology,NVIDIA Corp,Semiconductor leader
+META,stock,Communication Services,Meta Platforms Inc,Social media mega cap
+JPM,stock,Financials,JPMorgan Chase & Co,Largest US bank
+JNJ,stock,Healthcare,Johnson & Johnson,Healthcare conglomerate
+V,stock,Financials,Visa Inc,Payment network leader
+PG,stock,Consumer Staples,Procter & Gamble Co,Consumer staples leader
+UNH,stock,Healthcare,UnitedHealth Group Inc,Health insurance leader
+HD,stock,Consumer Discretionary,Home Depot Inc,Home improvement retail
+MA,stock,Financials,Mastercard Inc,Payment network
+XOM,stock,Energy,Exxon Mobil Corp,Integrated oil & gas
+CVX,stock,Energy,Chevron Corp,Integrated oil & gas
+PFE,stock,Healthcare,Pfizer Inc,Pharma large cap
+ABBV,stock,Healthcare,AbbVie Inc,Pharma large cap
+KO,stock,Consumer Staples,Coca-Cola Co,Consumer staples
+PEP,stock,Consumer Staples,PepsiCo Inc,Consumer staples
+COST,stock,Consumer Staples,Costco Wholesale Corp,Retail large cap
+TMO,stock,Healthcare,Thermo Fisher Scientific,Life sciences
+AVGO,stock,Technology,Broadcom Inc,Semiconductor
+LLY,stock,Healthcare,Eli Lilly & Co,Pharma large cap
+WMT,stock,Consumer Staples,Walmart Inc,Retail mega cap
+MRK,stock,Healthcare,Merck & Co Inc,Pharma large cap
+CSCO,stock,Technology,Cisco Systems Inc,Networking equipment
+ACN,stock,Technology,Accenture plc,IT consulting
+NEE,stock,Utilities,NextEra Energy Inc,Utility leader
+LIN,stock,Materials,Linde plc,Industrial gases
+AMT,stock,Real Estate,American Tower Corp,REIT cell towers
+CRM,stock,Technology,Salesforce Inc,Cloud CRM leader
+CAT,stock,Industrials,Caterpillar Inc,Industrial machinery
+GE,stock,Industrials,GE Aerospace,Aerospace & defense
+UPS,stock,Industrials,United Parcel Service,Logistics
+DE,stock,Industrials,Deere & Co,Agricultural machinery
+SPY,etf,Broad US Equity,SPDR S&P 500 ETF Trust,Benchmark US large cap
+QQQ,etf,US Tech Equity,Invesco QQQ Trust,Nasdaq 100 tracker
+IWM,etf,US Small Cap,iShares Russell 2000 ETF,Small cap exposure
+EFA,etf,Intl Developed,iShares MSCI EAFE ETF,International developed
+EEM,etf,Intl Emerging,iShares MSCI Emerging Markets ETF,Emerging markets
+AGG,etf,US Bonds,iShares Core US Aggregate Bond ETF,US investment grade bonds
+TLT,etf,US Long Bonds,iShares 20+ Year Treasury Bond ETF,Long duration treasuries
+GLD,etf,Commodities,SPDR Gold Shares,Gold exposure
+VNQ,etf,Real Estate,Vanguard Real Estate ETF,US REIT exposure
+LQD,etf,Corporate Bonds,iShares iBoxx Investment Grade Corp Bond ETF,Corporate bonds
+HYG,etf,High Yield Bonds,iShares iBoxx High Yield Corp Bond ETF,High yield bonds
+DBC,etf,Commodities,Invesco DB Commodity Index Tracking Fund,Broad commodities
