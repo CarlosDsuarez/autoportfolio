@@ -375,5 +375,5 @@ python -m pytest tests/ --cov=src --cov-report=html
 ---
 
 ## Licencia
-
+Carlos D. Suarez www.linkedin.com/in/carlos-david-suarez-data-corporate-finance-bi-business
 Proyecto académico — Universidad Icesi. Uso interno.
