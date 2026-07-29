@@ -132,29 +132,32 @@ result = run_backtest(prices, volumes, cfg)
 ## Instalación
 
 ### Requisitos del sistema
-- Python 3.10+
-- pip
+- Python 3.10+ (en Ubuntu/Debian: `python3` y `python3-venv`)
+- **No** uses `pip install` sobre el Python del sistema (PEP 668)
 
-### Clonar e instalar
+### Clonar e instalar (venv)
 
 ```bash
 git clone <repo-url>
-cd "CM Project"
+cd autoportfolio   # o el nombre de tu carpeta local
+
+# Crear entorno virtual (evita "externally-managed-environment")
+sudo apt install -y python3-venv   # solo si falla: ensurepip is not available
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -U pip
 pip install -r requirements.txt
+
+# Descargar y limpiar los 100 tickers → data/
+python -m src.data_client
 ```
 
-### `requirements.txt`
+En cada terminal nueva:
 
-```
-cvxpy==1.8.2
-numpy==1.26.4
-pandas==2.2.2
-scikit-learn==1.5.1
-scipy==1.13.1
-yfinance==0.2.40
-plotly==5.22.0
-matplotlib==3.9.0
-pytest==8.2.2
+```bash
+cd autoportfolio
+source .venv/bin/activate
 ```
 
 ---
