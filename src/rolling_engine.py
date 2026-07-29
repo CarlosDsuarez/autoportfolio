@@ -8,6 +8,7 @@ Restricciones cubiertas: R-05 (rolling window sin look-ahead).
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
@@ -171,15 +172,48 @@ def get_rebalance_dates(
     """
     Return end-of-period rebalance dates after warmup period.
 
+    Supports calendar frequencies and N-trading-day spacing:
+      - 'M' / 'ME': last trading day of each month
+      - 'Q' / 'QE': last trading day of each quarter
+      - '<N>D' (e.g. '15D'): every N **trading days** (días hábiles
+        del índice de precios), NOT calendar days. Chosen for
+        determinismo (R-10) and to avoid weekend/holiday drift.
+
     Args:
         prices: Price DataFrame.
-        freq: Rebalance frequency ('M'=monthly, 'Q'=quarterly).
+        freq: Rebalance frequency ('M', 'Q', or '<N>D').
         warmup: Minimum rows before first rebalance.
 
     Returns:
         List of rebalance dates.
+
+    Raises:
+        ValueError: If freq is not supported.
     """
     dates = prices.index.sort_values()
+
+    # --- N trading-day cadence: '<N>D' ---
+    m = re.fullmatch(r"(\d+)D", str(freq).upper())
+    if m:
+        n_days = int(m.group(1))
+        if n_days < 1:
+            raise ValueError(f"Invalid freq '{freq}': N must be >= 1.")
+        # First eligible index position with >= warmup history
+        # dates[i] has (i+1) rows with index <= dates[i]
+        start_idx = warmup - 1
+        if start_idx >= len(dates):
+            rebal_dates: list[pd.Timestamp] = []
+        else:
+            idxs = list(range(start_idx, len(dates), n_days))
+            rebal_dates = [pd.Timestamp(dates[i]) for i in idxs]
+
+        logger.info(
+            "Rebalance dates (%s trading days): %d dates from %s to %s",
+            n_days, len(rebal_dates),
+            rebal_dates[0].date() if rebal_dates else "N/A",
+            rebal_dates[-1].date() if rebal_dates else "N/A",
+        )
+        return rebal_dates
 
     # Normalise aliases: pandas 2.2+ uses ME/QE but to_period still uses M/Q
     # Accept both "M"/"ME" and "Q"/"QE" from callers
@@ -191,10 +225,12 @@ def get_rebalance_dates(
     elif _norm == "Q":
         groups = dates.to_period("Q")
     else:
-        raise ValueError(f"Unsupported freq: {freq}. Use 'M' or 'Q'.")
+        raise ValueError(
+            f"Unsupported freq: {freq}. Use 'M', 'Q', or '<N>D' (e.g. '15D')."
+        )
 
     # Last trading day of each period
-    rebal_dates = (
+    rebal_dates_arr = (
         pd.Series(dates, index=dates)
         .groupby(groups)
         .last()
@@ -203,7 +239,7 @@ def get_rebalance_dates(
 
     # Filter: only dates with enough warmup
     rebal_dates = [
-        pd.Timestamp(d) for d in rebal_dates
+        pd.Timestamp(d) for d in rebal_dates_arr
         if (dates <= d).sum() >= warmup
     ]
 

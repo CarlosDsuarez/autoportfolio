@@ -43,15 +43,27 @@ CM Project/
 │   ├── min_variance_replacement.py # Fase 4: reemplazo por mínima varianza
 │   ├── order_execution.py        # Fase 4: ejecución TWAP
 │   ├── rebalancing_engine.py     # Fase 4: motor de rebalanceo unificado
-│   ├── backtest_engine.py        # Fase 5: backtest rolling OOS
+│   ├── backtest_engine.py        # Fase 5: backtest rolling OOS (+ Fase 6)
 │   ├── metrics_calculator.py     # Fase 5: métricas (Sharpe, MaxDD, VaR, ...)
-│   └── dashboard_results.py      # Fase 5: dashboard interactivo HTML/Plotly
-├── tests/                        # Suite de pruebas (229 tests)
+│   ├── dashboard_results.py      # Fase 5: dashboard interactivo HTML/Plotly
+│   ├── position_ledger.py        # Fase 6: libro de posiciones FIFO (sin broker)
+│   ├── regime_detector.py        # Fase 6: régimen de mercado (4 estados)
+│   ├── signal_stack.py           # Fase 6: motor multi-factor (mom/MR/vol/liq)
+│   ├── hrp_sizing.py             # Fase 6: Hierarchical Risk Parity
+│   ├── conviction_scoring.py     # Fase 6: conviction rule-based (sin LLM)
+│   └── tail_risk_overlay.py      # Fase 6: interfaz Tail Risk (bloqueada por IV)
+├── tests/                        # Suite de pruebas (238+ tests)
 │   ├── test_data_pipeline.py
 │   ├── test_phase2_estimation.py
 │   ├── test_optimizer.py
 │   ├── test_rebalancing.py
-│   └── test_backtest.py
+│   ├── test_backtest.py
+│   ├── test_position_ledger.py
+│   ├── test_regime_detector.py
+│   ├── test_signal_stack.py
+│   ├── test_hrp_sizing.py
+│   ├── test_conviction_scoring.py
+│   └── test_tail_risk_overlay.py
 ├── experiments/                  # Scripts de experimentos
 │   ├── experiment_1_mv_vs_robust.py
 │   ├── experiment_2_transaction_costs.py
@@ -70,23 +82,46 @@ CM Project/
 ```
 yfinance → data_client → universe_filter
                               ↓
-             rolling_engine (ventanas OOS)
+             rolling_engine (ventanas OOS, freq M/Q/15D)
                               ↓
          expected_returns + covariance_estimators
                               ↓
-            portfolio_optimizer (interfaz unificada)
-           ┌──────────────────┬──────────────────┐
-      mv_classic           robust          mv_tc / turnover / liquidity
-                              ↓
-              rebalancing_engine
-           ┌──────────┬──────────┬──────────┐
-      drift_monitor  momentum  random  min_variance (reemplazo)
-                              ↓
-                    order_execution (TWAP)
-                              ↓
-                    backtest_engine (NAV diario)
-                              ↓
+   ┌──────────── portfolio_optimizer ────────────┐
+   │  mv_classic / robust / mv_tc / turnover / liq │
+   └──────────────────┬─────── hrp_sizing ────────┘
+                      ↓
+         [Fase 6 opcional] regime_detector
+                      ↓
+                  signal_stack → conviction_scoring
+                      ↓
+              rebalancing_engine  OR  position_ledger (FIFO)
+                      ↓
+                    backtest_engine (NAV diario + snapshots)
+                      ↓
                   metrics_calculator + dashboard
+```
+
+### Fase 6 — Motor de Señales + Simulación Live (sin broker)
+
+Simulación interna estilo live trading **sin conexión a broker**:
+- `PositionLedger`: pesos → shares, costeo FIFO, snapshots auditables.
+- `get_rebalance_dates(freq="15D")`: cada N **días hábiles** (no calendario).
+- Régimen 4 estados + multi-factor (momentum, mean-reversion, vol, liquidez).
+- Conviction **rule-based** en backtest (sin LLM → evita look-ahead).
+- HRP como `opt_method="hrp"` comparable con MVO/robusto.
+- `TailRiskOverlay`: solo interfaz; requiere IV surface (CBOE/ORATS/Polygon) no disponible en `data_client`.
+
+```python
+cfg = BacktestConfig(
+    opt_method="hrp",
+    rebalance_freq="15D",
+    use_signal_stack=True,
+    use_position_ledger=True,
+    regime_window=63,
+)
+result = run_backtest(prices, volumes, cfg)
+# result.ledger_snapshots  → List[LedgerSnapshot]
+# result.regime_series     → pd.Series de estados por fecha de rebalanceo
 ```
 
 ---
@@ -268,8 +303,8 @@ metrics = compute_metrics(
 
 | Parámetro | Default | Descripción |
 |-----------|---------|-------------|
-| `opt_method` | `"mv_classic"` | Método de optimización |
-| `rebalance_freq` | `"M"` | Frecuencia: `"M"` mensual, `"Q"` trimestral |
+| `opt_method` | `"mv_classic"` | Método: MVO/robusto/... o `"hrp"` (Fase 6) |
+| `rebalance_freq` | `"M"` | `"M"`/`"Q"`/`"ME"`/`"QE"` o `"15D"` (días hábiles) |
 | `window` | `252` | Días en ventana de entrenamiento |
 | `warmup` | `252` | Días de warmup antes del primer rebalanceo |
 | `mu_method` | `"historical"` | Estimador de retornos esperados |
@@ -277,6 +312,9 @@ metrics = compute_metrics(
 | `replacement_rule` | `"none"` | Regla de reemplazo de activos |
 | `max_weight` | `0.30` | Peso máximo por activo (30%) |
 | `turnover_limit` | `0.20` | Límite de turnover por rebalanceo (20%) |
+| `use_signal_stack` | `False` | Fase 6: régimen + señales + conviction |
+| `use_position_ledger` | `False` | Fase 6: simulación en shares (FIFO) |
+| `regime_window` | `63` | Fase 6: ventana del clasificador de régimen |
 | `kappa` | `0.10` | Nivel de robustez (incertidumbre elipsoidal) |
 | `initial_nav` | `1_000_000` | NAV inicial en USD |
 | `commission_bps` | `5.0` | Comisión en bps |
@@ -353,7 +391,7 @@ pip install pytest-cov
 python -m pytest tests/ --cov=src --cov-report=html
 ```
 
-**Estado actual**: 229/229 passing ✅
+**Estado actual**: 238+ passing (excl. `test_data_pipeline` network-dependent) ✅
 
 ---
 

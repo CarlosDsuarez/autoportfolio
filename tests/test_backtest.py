@@ -579,3 +579,55 @@ class TestBacktestMetricsPipeline:
         assert m.n_days > 0
         assert m.sharpe_ci_low <= m.sharpe_ratio <= m.sharpe_ci_high
         assert m.cvar_95 >= m.var_95_historical - 1e-10
+
+
+# ===================================================================
+# Fase 6: signals / HRP / PositionLedger / 15D
+# ===================================================================
+class TestFase6Backtest:
+    def test_freq_15d(self, synthetic_prices, synthetic_volumes):
+        cfg = BacktestConfig(
+            opt_method="mv_classic",
+            rebalance_freq="15D",
+            window=126,
+            warmup=126,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        assert isinstance(result, BacktestResult)
+        assert len(result.nav) > 0
+        assert not result.rebalance_log.empty
+
+    def test_opt_method_hrp(self, synthetic_prices, synthetic_volumes):
+        cfg = BacktestConfig(
+            opt_method="hrp",
+            rebalance_freq="Q",
+            window=126,
+            warmup=126,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        assert isinstance(result, BacktestResult)
+        assert (result.rebalance_log["opt_method"] == "hrp").all()
+        # Weights sum ≈ 1 on rebalance days
+        for r in result.daily_records:
+            if r.is_rebalance and len(r.weights) > 0:
+                assert abs(r.weights.sum() - 1.0) < 1e-5
+
+    def test_signal_stack_and_ledger(self, synthetic_prices, synthetic_volumes):
+        cfg = BacktestConfig(
+            opt_method="hrp",
+            rebalance_freq="15D",
+            window=126,
+            warmup=126,
+            use_signal_stack=True,
+            use_position_ledger=True,
+            regime_window=63,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        assert isinstance(result, BacktestResult)
+        assert len(result.ledger_snapshots) > 0
+        assert result.regime_series is not None
+        assert len(result.regime_series) > 0
+        # Snapshots have positive NAV
+        assert all(s.nav > 0 for s in result.ledger_snapshots)
+        # Final NAV finite
+        assert np.isfinite(result.nav.iloc[-1])
