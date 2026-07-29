@@ -133,6 +133,14 @@ class TestRollingEngine:
             get_rebalance_dates(prices, freq="M", warmup=252)
         )
 
+    def test_rebalance_dates_15d_trading_days(self, prices):
+        """T-32: '<N>D' uses trading-day spacing, not calendar days."""
+        dates = get_rebalance_dates(prices, freq="15D", warmup=252)
+        assert len(dates) > 0
+        idx = prices.index
+        for a, b in zip(dates[:-1], dates[1:]):
+            assert idx.get_loc(b) - idx.get_loc(a) == 15
+
 
 # ===========================================================================
 # T-08: Expected Returns

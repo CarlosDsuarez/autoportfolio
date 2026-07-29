@@ -5,10 +5,17 @@ Loop temporal:
   for t in rebalance_dates:
       1. Obtener ventana de entrenamiento (get_window, R-05)
       2. Filtrar universo activo (filter_universe_at_date, R-03)
-      3. Estimar mu y Sigma
-      4. Optimizar portafolio (portfolio_optimizer.optimize)
+      3. Estimar mu y Sigma  OR  HRP sizing (Fase 6)
+      4. Optimizar portafolio (portfolio_optimizer.optimize / hrp_weights)
       5. Reequilibrar (rebalancing_engine.rebalance, R-07)
+         o PositionLedger (Fase 6, simulación sin broker)
       6. Simular NAV diario en periodo OOS hasta siguiente rebalanceo
+
+Fase 6 (extensión):
+  - freq='15D' (días hábiles) vía get_rebalance_dates
+  - opt_method='hrp'
+  - use_signal_stack → regime + signals + conviction
+  - use_position_ledger → trades/shares/FIFO audit trail
 
 Registra por fecha: NAV, pesos, trades, costos, turnover.
 Validacion de no look-ahead en cada iteracion (R-05).
@@ -17,9 +24,11 @@ seed(42) global para reproducibilidad (R-10).
 Restricciones cubiertas: R-01, R-02, R-03, R-05, R-06, R-07, R-09, R-10.
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -30,6 +39,10 @@ from src.covariance_estimators import estimate_covariance
 from src.universe_filter import filter_universe_at_date
 from src.portfolio_optimizer import optimize
 from src.rebalancing_engine import rebalance
+
+if TYPE_CHECKING:
+    from src.position_ledger import LedgerSnapshot
+    from src.signal_stack import SignalStackConfig
 
 logger = logging.getLogger("backtest_engine")
 
@@ -43,10 +56,14 @@ _INITIAL_NAV = 1_000_000.0
 # ===================================================================
 @dataclass
 class BacktestConfig:
-    """Configuration for a single backtest run."""
+    """Configuration for a single backtest run.
 
-    opt_method: str = "mv_classic"     # portfolio_optimizer method
-    rebalance_freq: str = "ME"         # 'ME'=monthly, 'QE'=quarterly (pandas 2.2+)
+    Fase 5 defaults preserved. Fase 6 fields are opt-in so existing
+    tests and callers keep identical behaviour.
+    """
+
+    opt_method: str = "mv_classic"     # portfolio_optimizer method OR 'hrp'
+    rebalance_freq: str = "ME"         # 'ME'/'QE'/'M'/'Q'/'15D'/...
     window: int = 252                  # training window (days)
     warmup: int = 252                  # warmup before first rebalance
     mu_method: str = "historical"      # expected returns estimator
@@ -61,6 +78,12 @@ class BacktestConfig:
     spread_bps: float = 2.0
     impact_coef: float = 0.1
     seed: int = SEED
+    # --- Fase 6 ---
+    use_signal_stack: bool = False
+    use_position_ledger: bool = False
+    signal_config: Optional["SignalStackConfig"] = None
+    regime_window: int = 63
+    conviction_top_k: Optional[int] = None  # None = tilt all active names
 
 
 @dataclass
@@ -86,6 +109,112 @@ class BacktestResult:
     weights: pd.DataFrame           # Daily weights (date × ticker)
     rebalance_log: pd.DataFrame     # One row per rebalance event
     daily_records: List[DailyRecord] = field(default_factory=list)
+    # Fase 6 extensions (additive; empty/None when unused)
+    ledger_snapshots: List["LedgerSnapshot"] = field(default_factory=list)
+    regime_series: Optional[pd.Series] = None
+
+
+# ===================================================================
+# Helpers (Fase 6)
+# ===================================================================
+def _estimate_cost_fraction(
+    w_prev: pd.Series,
+    w_new: pd.Series,
+    commission_bps: float,
+    spread_bps: float,
+) -> float:
+    """Rough L1-turnover based cost fraction when not using rebalance()."""
+    aligned = w_prev.reindex(w_new.index).fillna(0.0)
+    turnover = float((w_new - aligned).abs().sum())
+    bps = commission_bps + spread_bps
+    return turnover * (bps / 10_000.0)
+
+
+def _build_target_weights(
+    config: BacktestConfig,
+    wp: pd.DataFrame,
+    prices: pd.DataFrame,
+    volumes: pd.DataFrame,
+    t: pd.Timestamp,
+    active_clean: List[str],
+    w_prev: Optional[pd.Series],
+) -> tuple[pd.Series, dict, Optional[str]]:
+    """Build target weights via optimizer, HRP, and optional signal stack.
+
+    Returns:
+        (w_target, opt_meta, regime_state_or_None)
+    """
+    regime_state: Optional[str] = None
+    conviction = None
+
+    if config.use_signal_stack:
+        from src.regime_detector import classify_regime
+        from src.signal_stack import compute_signal_scores
+        from src.conviction_scoring import conviction_score, conviction_to_tilts
+
+        report = classify_regime(
+            prices[active_clean] if set(active_clean) <= set(prices.columns)
+            else prices,
+            t,
+            window=config.regime_window,
+        )
+        regime_state = report.state
+        signal_scores = compute_signal_scores(
+            prices, volumes, t, config=config.signal_config,
+        )
+        signal_scores = signal_scores.reindex(active_clean).fillna(0.0)
+        conviction = conviction_score(signal_scores, regime_state)
+        if config.conviction_top_k is not None and config.conviction_top_k > 0:
+            top = conviction.nlargest(min(config.conviction_top_k, len(conviction)))
+            conviction = conviction.where(conviction.index.isin(top.index), other=-1e9)
+
+    # --- Sizing ---
+    if config.opt_method == "hrp":
+        from src.hrp_sizing import hrp_weights
+        rets = wp.pct_change().dropna(how="all")
+        w_target = hrp_weights(rets)
+        w_target = w_target.reindex(active_clean).fillna(0.0)
+        s = w_target.sum()
+        w_target = w_target / s if s > 1e-10 else pd.Series(
+            np.ones(len(active_clean)) / len(active_clean), index=active_clean,
+        )
+        # Soft max-weight cap
+        w_target = w_target.clip(upper=config.max_weight)
+        w_target = w_target / w_target.sum()
+        opt_meta = {
+            "expected_sharpe": 0.0,
+            "converged": True,
+            "method": "hrp",
+        }
+    else:
+        mu = estimate_expected_returns(wp, method=config.mu_method)
+        sigma = estimate_covariance(wp, method=config.cov_method)
+        opt_result = optimize(
+            mu=mu,
+            sigma=sigma,
+            method=config.opt_method,
+            w_prev=w_prev,
+            max_weight=config.max_weight,
+            turnover_limit=config.turnover_limit,
+            tc_lambda=config.tc_lambda,
+            kappa=config.kappa,
+        )
+        w_target = opt_result["weights"]
+        opt_meta = {
+            "expected_sharpe": opt_result.get("expected_sharpe", 0.0),
+            "converged": opt_result.get("converged", False),
+            "method": config.opt_method,
+        }
+
+    # Apply conviction tilts if signal stack active
+    if conviction is not None:
+        from src.conviction_scoring import conviction_to_tilts
+        w_target = conviction_to_tilts(conviction, base_weights=w_target)
+        # Re-apply max weight
+        w_target = w_target.clip(upper=config.max_weight)
+        w_target = w_target / w_target.sum() if w_target.sum() > 1e-10 else w_target
+
+    return w_target, opt_meta, regime_state
 
 
 # ===================================================================
@@ -102,9 +231,9 @@ def run_backtest(
     For each rebalance date:
       1. get_window → training prices (R-05 strict).
       2. filter_universe_at_date → active tickers (R-03).
-      3. estimate mu + Sigma on active subset.
-      4. optimize() → target weights (Fase 3).
-      5. rebalance() → executed weights with costs (Fase 4).
+      3. estimate mu + Sigma on active subset (or HRP).
+      4. optimize() / hrp_weights() → target weights.
+      5. rebalance() or PositionLedger → executed weights with costs.
       6. Simulate daily NAV in OOS period using actual prices.
 
     Args:
@@ -124,7 +253,7 @@ def run_backtest(
     if universe is None:
         universe = prices.columns.tolist()
 
-    # Rebalance dates
+    # Rebalance dates (supports M/Q/ME/QE and '<N>D')
     rebal_dates = get_rebalance_dates(
         prices, freq=config.rebalance_freq, warmup=config.warmup
     )
@@ -136,8 +265,9 @@ def run_backtest(
 
     logger.info(
         "Starting backtest: method=%s, freq=%s, window=%d, "
-        "%d rebalance dates [%s → %s]",
+        "signals=%s, ledger=%s, %d rebalance dates [%s → %s]",
         config.opt_method, config.rebalance_freq, config.window,
+        config.use_signal_stack, config.use_position_ledger,
         len(rebal_dates),
         rebal_dates[0].date(), rebal_dates[-1].date(),
     )
@@ -156,6 +286,13 @@ def run_backtest(
     weight_records: Dict[pd.Timestamp, pd.Series] = {}
     rebalance_log_rows: List[dict] = []
     daily_records: List[DailyRecord] = []
+    ledger_snapshots: List = []
+    regime_records: Dict[pd.Timestamp, str] = {}
+
+    ledger = None
+    if config.use_position_ledger:
+        from src.position_ledger import PositionLedger
+        ledger = PositionLedger(initial_cash=config.initial_nav)
 
     rebal_set = set(rebal_dates)
     all_dates = prices.index
@@ -193,14 +330,6 @@ def run_backtest(
 
                 active_clean = wp.columns.tolist()
 
-                # Estimate parameters
-                mu = estimate_expected_returns(
-                    wp, method=config.mu_method
-                )
-                sigma = estimate_covariance(
-                    wp, method=config.cov_method
-                )
-
                 # Align previous weights to current active tickers
                 if w_current is not None:
                     w_prev = w_current.reindex(active_clean).fillna(0.0)
@@ -212,59 +341,95 @@ def run_backtest(
                 else:
                     w_prev = None
 
-                # Optimize (Fase 3)
-                opt_result = optimize(
-                    mu=mu,
-                    sigma=sigma,
-                    method=config.opt_method,
-                    w_prev=w_prev,
-                    max_weight=config.max_weight,
-                    turnover_limit=config.turnover_limit,
-                    tc_lambda=config.tc_lambda,
-                    kappa=config.kappa,
-                )
-                w_target = opt_result["weights"]
-
-                # Rebalance (Fase 4)
-                if w_prev is None:
-                    w_prev = pd.Series(
-                        np.ones(len(active_clean)) / len(active_clean),
-                        index=active_clean,
-                    )
-                rebal_result = rebalance(
-                    t=t,
-                    w_current=w_prev,
-                    w_target=w_target,
+                w_target, opt_meta, regime_state = _build_target_weights(
+                    config=config,
+                    wp=wp,
                     prices=prices,
                     volumes=volumes,
-                    rule=config.replacement_rule,
-                    universe=universe,
-                    active_tickers=active,
-                    portfolio_value=nav,
-                    turnover_limit=config.turnover_limit,
-                    is_rebalance_date=True,
-                    commission_bps=config.commission_bps,
-                    spread_bps=config.spread_bps,
-                    impact_coef=config.impact_coef,
+                    t=t,
+                    active_clean=active_clean,
+                    w_prev=w_prev,
                 )
+                if regime_state is not None:
+                    regime_records[t] = regime_state
 
-                w_current = rebal_result.w_new
-                turnover_today = rebal_result.actual_turnover
-                # Cost as fraction of NAV (R-01)
-                cost_today = (
-                    rebal_result.cost / nav
-                    if nav > 1e-6 else 0.0
-                )
+                # --- Execution path ---
+                if config.use_position_ledger and ledger is not None:
+                    prices_t = prices.loc[t]
+                    nav_pre = ledger.nav(prices_t)
+                    if w_prev is None:
+                        w_prev_exec = pd.Series(0.0, index=active_clean)
+                    else:
+                        w_prev_exec = w_prev
+
+                    # Approximate turnover cost before applying trades
+                    cost_frac = _estimate_cost_fraction(
+                        w_prev_exec, w_target,
+                        config.commission_bps, config.spread_bps,
+                    )
+                    cost_abs = cost_frac * max(nav_pre, 1e-6)
+                    turnover_today = float(
+                        (w_target.reindex(w_prev_exec.index).fillna(0.0)
+                         - w_prev_exec).abs().sum()
+                    )
+                    # Also count new names
+                    extra = w_target.index.difference(w_prev_exec.index)
+                    turnover_today += float(w_target.reindex(extra).fillna(0.0).abs().sum())
+
+                    trades = ledger.trades_from_target_weights(
+                        w_target, prices_t, nav=nav_pre,
+                    )
+                    ledger.apply_trades(
+                        trades, prices_t, costs=cost_abs, t=t,
+                    )
+                    snap = ledger.snapshot(t, prices_t)
+                    ledger_snapshots.append(snap)
+                    nav = snap.nav
+                    w_current = ledger.weights_from_positions(prices_t)
+                    # Normalize invested weights to sum 1 for compatibility
+                    if w_current.sum() > 1e-10:
+                        w_current = w_current / w_current.sum()
+                    cost_today = cost_frac
+                else:
+                    # Classic weight-space path (Fase 5)
+                    if w_prev is None:
+                        w_prev = pd.Series(
+                            np.ones(len(active_clean)) / len(active_clean),
+                            index=active_clean,
+                        )
+                    rebal_result = rebalance(
+                        t=t,
+                        w_current=w_prev,
+                        w_target=w_target,
+                        prices=prices,
+                        volumes=volumes,
+                        rule=config.replacement_rule,
+                        universe=universe,
+                        active_tickers=active,
+                        portfolio_value=nav,
+                        turnover_limit=config.turnover_limit,
+                        is_rebalance_date=True,
+                        commission_bps=config.commission_bps,
+                        spread_bps=config.spread_bps,
+                        impact_coef=config.impact_coef,
+                    )
+                    w_current = rebal_result.w_new
+                    turnover_today = rebal_result.actual_turnover
+                    cost_today = (
+                        rebal_result.cost / nav
+                        if nav > 1e-6 else 0.0
+                    )
 
                 rebalance_log_rows.append({
                     "date": t,
                     "opt_method": config.opt_method,
                     "n_active": len(active_clean),
-                    "expected_sharpe": opt_result.get("expected_sharpe", 0.0),
+                    "expected_sharpe": opt_meta.get("expected_sharpe", 0.0),
                     "turnover": turnover_today,
                     "cost_fraction": cost_today,
                     "rule": config.replacement_rule,
-                    "converged": opt_result.get("converged", False),
+                    "converged": opt_meta.get("converged", False),
+                    "regime": regime_state,
                 })
 
             except Exception as exc:  # noqa: BLE001
@@ -274,7 +439,25 @@ def run_backtest(
                 )
 
         # --- NAV update ---
-        if w_current is not None and i > 0:
+        if config.use_position_ledger and ledger is not None:
+            prices_t = prices.loc[t] if t in prices.index else None
+            if prices_t is not None:
+                nav_new = ledger.nav(prices_t)
+                if i > 0 and nav > 1e-10:
+                    # Cost already deducted on rebalance day inside ledger
+                    daily_ret = (nav_new / nav) - 1.0
+                    if is_rebal and cost_today > 0 and abs(daily_ret + cost_today) > 1e-15:
+                        # cost already in nav_new; report gross-ish daily_ret
+                        pass
+                else:
+                    daily_ret = 0.0
+                nav = nav_new
+                w_mtm = ledger.weights_from_positions(prices_t)
+                if w_mtm.sum() > 1e-10:
+                    w_current = w_mtm / w_mtm.sum()
+            else:
+                daily_ret = 0.0
+        elif w_current is not None and i > 0:
             t_prev = oos_dates[i - 1]
             p_prev = prices.loc[t_prev] if t_prev in prices.index else None
             p_curr = prices.loc[t] if t in prices.index else None
@@ -324,6 +507,10 @@ def run_backtest(
     if not rebal_df.empty:
         rebal_df = rebal_df.set_index("date")
 
+    regime_series = (
+        pd.Series(regime_records, dtype=object) if regime_records else None
+    )
+
     logger.info(
         "Backtest complete: %d days, final NAV=%.2f "
         "(%.1f%% total return), %d rebalances",
@@ -338,6 +525,8 @@ def run_backtest(
         weights=weights_df,
         rebalance_log=rebal_df,
         daily_records=daily_records,
+        ledger_snapshots=ledger_snapshots,
+        regime_series=regime_series,
     )
 
 
