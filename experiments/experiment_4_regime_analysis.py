@@ -27,20 +27,15 @@ import logging
 import pandas as pd
 import numpy as np
 
-from src.data_client import fetch_prices, fetch_volumes, clean_prices
+from src.data_client import load_universe, fetch_prices, fetch_volumes, clean_prices
 from src.backtest_engine import BacktestConfig, run_backtest
 from src.metrics_calculator import compute_metrics, compare_metrics
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger("exp4")
 
-TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-    "JPM", "BAC", "GS",
-    "JNJ", "PFE",
-    "XOM", "CVX",
-    "SPY", "QQQ", "TLT",
-]
+# Universo canónico: 100 principales del S&P 500 (universe.csv)
+TICKERS = load_universe()["ticker"].tolist()
 
 # Full history needed to include warmup before first regime
 START = "2016-01-01"

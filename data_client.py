@@ -49,21 +49,28 @@ def load_universe(path: str = None) -> pd.DataFrame:
 
     Args:
         path: Path to universe file (.csv or .xlsx).
-              Defaults to universe.csv in the same folder as this script.
+              Defaults to universe.csv next to this script, or at the
+              repository root.
 
     Returns:
         DataFrame with columns [ticker, asset_type, sector, name,
         inclusion_reason].
     """
     if path is None:
-        # Look for csv or xlsx next to this script
-        for candidate in (_HERE / "universe.csv", _HERE / "universe.xlsx"):
+        candidates = [
+            _HERE / "universe.csv",
+            _HERE / "universe.xlsx",
+            _HERE.parent / "universe.csv",
+            _HERE.parent / "universe.xlsx",
+        ]
+        for candidate in candidates:
             if candidate.exists():
                 path = str(candidate)
                 break
         else:
             raise FileNotFoundError(
-                f"No universe.csv or universe.xlsx found in {_HERE}"
+                f"No universe.csv or universe.xlsx found in {_HERE} "
+                f"or {_HERE.parent}"
             )
 
     p = Path(path)

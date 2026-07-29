@@ -25,6 +25,8 @@ OOS, reglas de reemplazo de activos y métricas de rendimiento con IC bootstrap.
 
 ```
 CM Project/
+├── universe.csv                  # Universo canónico: 100 principales S&P 500
+├── criterios.md                  # Criterios de selección del universo
 ├── src/                          # Código fuente principal
 │   ├── data_client.py            # Fase 1: descarga y limpieza de datos
 │   ├── rolling_engine.py         # Fase 2: ventanas rolling OOS
@@ -63,7 +65,8 @@ CM Project/
 │   ├── test_signal_stack.py
 │   ├── test_hrp_sizing.py
 │   ├── test_conviction_scoring.py
-│   └── test_tail_risk_overlay.py
+│   ├── test_tail_risk_overlay.py
+│   └── test_universe.py
 ├── experiments/                  # Scripts de experimentos
 │   ├── experiment_1_mv_vs_robust.py
 │   ├── experiment_2_transaction_costs.py
@@ -161,12 +164,12 @@ pytest==8.2.2
 ### Backtest mínimo
 
 ```python
-from src.data_client import fetch_prices, fetch_volumes, clean_prices
+from src.data_client import load_universe, fetch_prices, fetch_volumes, clean_prices
 from src.backtest_engine import BacktestConfig, run_backtest
 from src.metrics_calculator import compute_metrics
 
-# 1. Descargar datos
-tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ", "TLT"]
+# 1. Universo canónico: 100 principales del S&P 500 (universe.csv)
+tickers = load_universe()["ticker"].tolist()
 prices_raw = fetch_prices(tickers, start="2019-01-01", end="2023-12-31")
 volumes_raw = fetch_volumes(tickers, start="2019-01-01", end="2023-12-31")
 prices, _ = clean_prices(prices_raw)
