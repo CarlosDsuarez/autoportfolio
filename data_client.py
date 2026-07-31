@@ -208,7 +208,7 @@ def _load_csv_fallback(
 # ===================================================================
 def fetch_prices(
     tickers: list[str],
-    start: str = "2019-01-01",
+    start: str = "2022-01-01",
     end: str = "2025-01-01",
     csv_fallback_path: str = "data/raw_prices_backup.csv",
 ) -> pd.DataFrame:
@@ -407,7 +407,7 @@ def calc_liquidity_scores(
 
 def fetch_volumes(
     tickers: list[str],
-    start: str = "2019-01-01",
+    start: str = "2022-01-01",
     end: str = "2025-01-01",
 ) -> pd.DataFrame:
     """
@@ -440,7 +440,7 @@ def fetch_volumes(
 # ===================================================================
 def run_data_pipeline(
     universe_path: str = None,
-    start: str = "2019-01-01",
+    start: str = "2022-01-01",
     end: str = "2025-01-01",
     output_dir: str = "data",
 ) -> dict:

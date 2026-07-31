@@ -149,8 +149,35 @@ source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
 
-# Descargar y limpiar los 100 tickers → data/
+# Descargar y limpiar los 100 tickers desde 2022 → data/
 python -m src.data_client
+```
+
+### Backtest histórico vs “bot” cada 15 días
+
+Hay **dos modos** distintos:
+
+| Modo | Qué hace | Cómo se corre |
+|------|----------|---------------|
+| **Backtest** | Simula el pasado (desde 2022) rebalanceando cada 15 días hábiles | `python -m src.data_client` + `run_backtest(..., rebalance_freq="15D")` |
+| **Periódico (live sim)** | Un solo rebalanceo “hoy” si ya pasaron 15 días hábiles; guarda estado en `data/live_state/` | `python -m scripts.run_periodic_rebalance` |
+
+**Importante:** nada se ejecuta solo en la nube. GitHub guarda código; el Cloud Agent / tu PC ejecutan comandos. Para automatizar, usa cron en una máquina que tengas encendida:
+
+```bash
+# Cada día laborable a las 16:00; el script decide si ya tocan 15D
+0 16 * * 1-5 cd /path/to/autoportfolio && .venv/bin/python -m scripts.run_periodic_rebalance
+```
+
+```bash
+# Primera vez (fuerza el primer rebalanceo)
+python -m scripts.run_periodic_rebalance --force
+
+# Después, en días normales:
+python -m scripts.run_periodic_rebalance
+
+# Solo preguntar si toca (exit 0 = sí):
+python -m scripts.run_periodic_rebalance --check-only
 ```
 
 En cada terminal nueva:
@@ -173,20 +200,22 @@ from src.metrics_calculator import compute_metrics
 
 # 1. Universo canónico: 100 principales del S&P 500 (universe.csv)
 tickers = load_universe()["ticker"].tolist()
-prices_raw = fetch_prices(tickers, start="2019-01-01", end="2023-12-31")
-volumes_raw = fetch_volumes(tickers, start="2019-01-01", end="2023-12-31")
+prices_raw = fetch_prices(tickers, start="2022-01-01", end="2025-01-01")
+volumes_raw = fetch_volumes(tickers, start="2022-01-01", end="2025-01-01")
 prices, _ = clean_prices(prices_raw)
 volumes = volumes_raw.reindex(prices.index).ffill().fillna(1e6)
 
-# 2. Configurar backtest
+# 2. Configurar backtest (rebalanceo cada 15 días hábiles)
 config = BacktestConfig(
-    opt_method="mv_classic",   # "mv_classic" | "robust" | "mv_tc" | ...
-    rebalance_freq="Q",        # "M" | "Q"
-    window=252,                # días de entrenamiento
-    warmup=252,                # días de warmup inicial
-    max_weight=0.30,           # máximo peso por activo
-    turnover_limit=0.20,       # límite de turnover por rebalanceo
-    seed=42,                   # reproducibilidad
+    opt_method="hrp",          # o "mv_classic" | "robust" | ...
+    rebalance_freq="15D",      # "M" | "Q" | "15D"
+    window=252,
+    warmup=252,
+    use_signal_stack=True,
+    use_position_ledger=True,
+    max_weight=0.30,
+    turnover_limit=0.20,
+    seed=42,
 )
 
 # 3. Ejecutar backtest
