@@ -74,6 +74,47 @@ class TestFIFOPnL:
                 prices_row, t=pd.Timestamp("2022-01-04"),
             )
 
+    def test_oversell_does_not_corrupt_inventory(self, prices_row):
+        """Oversell must raise without wiping lots or cash (atomic apply)."""
+        ledger = PositionLedger(initial_cash=10_000.0)
+        ledger.apply_trades(
+            pd.DataFrame([{"ticker": "A", "shares": 5.0}]),
+            prices_row, t=pd.Timestamp("2022-01-03"),
+        )
+        cash_before = ledger.cash
+        nav_before = ledger.nav(prices_row)
+        with pytest.raises(ValueError):
+            ledger.apply_trades(
+                pd.DataFrame([{"ticker": "A", "shares": -10.0}]),
+                prices_row, t=pd.Timestamp("2022-01-04"),
+            )
+        pos = ledger.positions()
+        assert abs(pos["A"] - 5.0) < 1e-8
+        assert abs(ledger.cash - cash_before) < 1e-8
+        assert abs(ledger.nav(prices_row) - nav_before) < 1e-8
+        assert abs(ledger.realized_pnl) < 1e-12
+
+    def test_batch_failure_rolls_back_prior_trades(self, prices_row):
+        """A failed sell later in the batch must not keep earlier buys."""
+        ledger = PositionLedger(initial_cash=10_000.0)
+        ledger.apply_trades(
+            pd.DataFrame([{"ticker": "A", "shares": 5.0}]),
+            prices_row, t=pd.Timestamp("2022-01-03"),
+        )
+        cash_before = ledger.cash
+        with pytest.raises(ValueError):
+            ledger.apply_trades(
+                pd.DataFrame([
+                    {"ticker": "B", "shares": 10.0},
+                    {"ticker": "A", "shares": -10.0},
+                ]),
+                prices_row, t=pd.Timestamp("2022-01-04"),
+            )
+        pos = ledger.positions()
+        assert "B" not in pos.index
+        assert abs(pos["A"] - 5.0) < 1e-8
+        assert abs(ledger.cash - cash_before) < 1e-8
+
 
 # ===========================================================================
 # NAV
@@ -93,6 +134,20 @@ class TestNAV:
         nav = ledger.nav(prices_row)
         assert abs(nav - 10_000.0) < 1e-6
         assert abs(ledger.cash - 8_000.0) < 1e-6
+
+    def test_nav_rejects_missing_or_nan_mark_prices(self, prices_row):
+        """Missing/NaN marks must not silently value holdings at 0."""
+        ledger = PositionLedger(initial_cash=10_000.0)
+        ledger.apply_trades(
+            pd.DataFrame([{"ticker": "A", "shares": 10.0}]),
+            prices_row, t=pd.Timestamp("2022-01-03"),
+        )
+        with pytest.raises(ValueError):
+            ledger.nav(pd.Series({"B": 50.0}))
+        with pytest.raises(ValueError):
+            ledger.nav(pd.Series({"A": np.nan}))
+        with pytest.raises(ValueError):
+            ledger.snapshot(pd.Timestamp("2022-01-04"), pd.Series({"A": np.nan}))
 
     def test_nav_tracks_price_changes(self, prices_row):
         ledger = PositionLedger(initial_cash=10_000.0)
@@ -199,3 +254,13 @@ class TestRebalanceFreqND:
     def test_invalid_freq_raises(self, long_prices):
         with pytest.raises(ValueError):
             get_rebalance_dates(long_prices, freq="W", warmup=252)
+
+    def test_warmup_zero_nd_starts_at_first_bar(self, long_prices):
+        """warmup=0 must not use start_idx=-1 (dates[-1] first → collapsed OOS)."""
+        dates = get_rebalance_dates(long_prices, freq="15D", warmup=0)
+        assert len(dates) > 1
+        assert dates[0] == pd.Timestamp(long_prices.index[0])
+        assert dates == sorted(dates)
+        idx = long_prices.index
+        for a, b in zip(dates[:-1], dates[1:]):
+            assert idx.get_loc(b) - idx.get_loc(a) == 15
