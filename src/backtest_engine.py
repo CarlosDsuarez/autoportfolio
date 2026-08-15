@@ -305,6 +305,9 @@ def run_backtest(
         is_rebal = t in rebal_set
         turnover_today = 0.0
         cost_today = 0.0
+        # Price move t_prev→t accrues to pre-rebalance holdings.
+        # Rebalancing is applied at t's close after that mark-to-market.
+        w_for_return = w_current
 
         # --- Rebalance step ---
         if is_rebal:
@@ -457,16 +460,16 @@ def run_backtest(
                     w_current = w_mtm / w_mtm.sum()
             else:
                 daily_ret = 0.0
-        elif w_current is not None and i > 0:
+        elif w_for_return is not None and i > 0:
             t_prev = oos_dates[i - 1]
             p_prev = prices.loc[t_prev] if t_prev in prices.index else None
             p_curr = prices.loc[t] if t in prices.index else None
             if p_prev is not None and p_curr is not None:
-                common = w_current.index.intersection(p_prev.index).intersection(
+                common = w_for_return.index.intersection(p_prev.index).intersection(
                     p_curr.index
                 )
                 if len(common) > 0:
-                    wf = w_current.reindex(common).fillna(0.0)
+                    wf = w_for_return.reindex(common).fillna(0.0)
                     wf /= wf.sum() if wf.sum() > 1e-10 else 1.0
                     ret = (p_curr[common] / p_prev[common] - 1.0)
                     portfolio_ret = float((wf * ret).sum())
