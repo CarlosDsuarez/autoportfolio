@@ -697,3 +697,27 @@ class TestLedgerTurnoverCap:
             assert r.turnover <= 0.20 + 1e-5, (
                 f"ledger rebalance turnover {r.turnover} exceeded limit"
             )
+
+
+class TestBlackLittermanBacktestWiring:
+    def test_black_litterman_produces_rebalances(
+        self, synthetic_prices, synthetic_volumes
+    ):
+        """Documented mu_method=black_litterman must not silently flat-line.
+
+        Previously estimate_expected_returns was called without cov_matrix,
+        every rebalance raised, and run_backtest swallowed the error →
+        0 rebalances and constant initial NAV.
+        """
+        cfg = BacktestConfig(
+            opt_method="mv_classic",
+            mu_method="black_litterman",
+            rebalance_freq="Q",
+            window=126,
+            warmup=126,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        assert not result.rebalance_log.empty
+        assert len(result.rebalance_log) >= 1
+        assert result.nav.nunique() > 1
+        assert np.isfinite(result.nav.iloc[-1])

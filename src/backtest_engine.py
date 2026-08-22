@@ -236,8 +236,13 @@ def _build_target_weights(
             "method": "hrp",
         }
     else:
-        mu = estimate_expected_returns(wp, method=config.mu_method)
+        # Covariance first: black_litterman requires cov_matrix. Estimating
+        # mu without it raised every rebalance, which run_backtest swallowed
+        # → silent flat NAV / zero rebalances for a documented mu_method.
         sigma = estimate_covariance(wp, method=config.cov_method)
+        mu = estimate_expected_returns(
+            wp, method=config.mu_method, cov_matrix=sigma,
+        )
         opt_result = optimize(
             mu=mu,
             sigma=sigma,
