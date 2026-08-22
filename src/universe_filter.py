@@ -138,13 +138,22 @@ def filter_universe_at_date(
     exclusions = []
     all_tickers = list(prices.columns)
 
-    # Filter 1: minimum volume
-    low_volume = avg_vol_t[avg_vol_t < min_volume]
+    # Filter 1: minimum volume (NaN/inf avg volume must also be excluded —
+    # `NaN < min_volume` is False, so a bare `<` let broken yfinance volume
+    # series into the active set and downstream ADV→impact path).
+    vol_missing = ~np.isfinite(avg_vol_t)
+    vol_too_low = avg_vol_t < min_volume
+    low_volume = avg_vol_t[vol_missing | vol_too_low]
     for ticker in low_volume.index:
+        val = avg_vol_t[ticker]
         exclusions.append({
             "ticker": ticker,
-            "reason": f"avg_volume < {min_volume:,.0f}",
-            "value": f"{avg_vol_t[ticker]:,.0f}",
+            "reason": (
+                "avg_volume non-finite"
+                if not np.isfinite(val)
+                else f"avg_volume < {min_volume:,.0f}"
+            ),
+            "value": "nan" if not np.isfinite(val) else f"{val:,.0f}",
         })
 
     # Filter 2: Amihud percentile

@@ -515,3 +515,45 @@ class TestRebalancingEngine:
             is_rebalance_date=True,
         )
         pd.testing.assert_series_equal(r1.w_new, r2.w_new, atol=1e-6)
+
+
+class TestNanAdvMarketImpact:
+    """Missing ADV must not invent a tiny sentinel that wipes NAV."""
+
+    def test_nan_adv_does_not_explode_impact_cost(self):
+        dates = pd.bdate_range("2024-01-01", periods=40)
+        prices = pd.DataFrame(
+            {
+                "A": np.linspace(100, 110, len(dates)),
+                "B": np.linspace(50, 55, len(dates)),
+            },
+            index=dates,
+        )
+        volumes = pd.DataFrame(
+            {
+                "A": np.full(len(dates), 1e6),
+                "B": np.nan,  # yfinance-style missing volume series
+            },
+            index=dates,
+        )
+        t = dates[-1]
+        w_current = pd.Series({"A": 0.5, "B": 0.5})
+        w_target = pd.Series({"A": 0.1, "B": 0.9})
+        pv = 1_000_000.0
+
+        result = execute_rebalance(
+            t=t,
+            w_current=w_current,
+            w_target=w_target,
+            portfolio_value=pv,
+            prices=prices,
+            volumes=volumes,
+        )
+        # Commission + spread only on |Δw|*NAV ≈ 0.8 * 1e6 → ~560 at 7 bps.
+        # Pre-fix sentinel ADV=$1000 produced multi-million impact.
+        assert result.total_cost < 5_000.0
+        assert result.total_cost / pv < 0.01
+        if not result.order_df.empty and "B" in result.order_df["ticker"].values:
+            b_row = result.order_df.set_index("ticker").loc["B"]
+            assert b_row["market_impact"] == 0.0
+
