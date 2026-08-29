@@ -120,6 +120,37 @@ class TestCleanPrices:
         # Should still work (interpolation covers remaining)
         assert not clean.empty
 
+    def test_midpanel_halt_preserves_calendar(self, sample_prices):
+        """Trading halt > ffill_max must not stitch non-consecutive sessions.
+
+        Previously clean_prices used dropna() on rows, removing halt dates for
+        *all* tickers. Downstream pct_change then treated a multi-session gap
+        as a single-day return (silent return / vol corruption).
+        """
+        gapped = sample_prices.copy()
+        halt = gapped.index[100:104]  # 4 sessions; ffill_max=2 leaves residual NaNs
+        gapped.loc[halt, "AAPL"] = np.nan
+        clean, report = clean_prices(gapped, ffill_max=2)
+
+        assert not clean.empty
+        assert "AAPL" not in clean.columns  # incomplete ticker dropped
+        assert set(clean.columns) == {"MSFT", "SPY"}
+        # Full calendar retained for surviving tickers (no row stitching)
+        assert len(clean) == len(sample_prices)
+        assert list(clean.index) == list(sample_prices.index)
+        aapl_row = report[report["ticker"] == "AAPL"].iloc[0]
+        assert not bool(aapl_row["in_clean_set"])
+
+    def test_late_ipo_does_not_truncate_panel(self, sample_prices):
+        """Late-listed ticker under 5% missing must not truncate all history."""
+        gapped = sample_prices.copy()
+        # ~2% leading NaNs — below the 5% ticker-drop threshold
+        gapped.iloc[:10, 0] = np.nan
+        clean, _ = clean_prices(gapped, ffill_max=2)
+        assert clean.index[0] == sample_prices.index[0]
+        assert "AAPL" not in clean.columns
+        assert len(clean) == len(sample_prices)
+
     def test_quality_report_columns(self, sample_prices):
         _, report = clean_prices(sample_prices)
         expected = {
