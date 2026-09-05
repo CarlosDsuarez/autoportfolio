@@ -130,6 +130,58 @@ def _estimate_cost_fraction(
     return turnover * (bps / 10_000.0)
 
 
+_CAPM_BENCHMARK = "SPY"
+
+
+def _estimate_mu_for_active(
+    config: BacktestConfig,
+    wp: pd.DataFrame,
+    prices: pd.DataFrame,
+) -> pd.Series:
+    """Estimate expected returns on the active window, with CAPM guardrails.
+
+    ``capm_shrunk`` needs the benchmark column for betas. The active
+    investable set often excludes SPY (liquidity filter / stock-only
+    universe). Estimating on ``wp`` alone then raises, and ``run_backtest``
+    swallows the error → silent flat NAV / zero rebalances.
+
+    When the benchmark is missing from ``wp`` but present in ``prices`` on
+    the same dates, append it for estimation only, then drop it from mu.
+    If the benchmark is unavailable entirely, fall back to historical mu
+    rather than failing the rebalance.
+    """
+    method = (config.mu_method or "historical").lower().strip()
+    mu_prices = wp
+
+    if method == "capm_shrunk" and _CAPM_BENCHMARK not in wp.columns:
+        if _CAPM_BENCHMARK in prices.columns:
+            spy = prices[_CAPM_BENCHMARK].reindex(wp.index)
+            if spy.notna().all() and len(spy) == len(wp):
+                mu_prices = wp.copy()
+                mu_prices[_CAPM_BENCHMARK] = spy.astype(float)
+            else:
+                logger.warning(
+                    "capm_shrunk: %s incomplete on active window — "
+                    "falling back to historical mu.",
+                    _CAPM_BENCHMARK,
+                )
+                method = "historical"
+        else:
+            logger.warning(
+                "capm_shrunk: %s not in price panel — "
+                "falling back to historical mu.",
+                _CAPM_BENCHMARK,
+            )
+            method = "historical"
+
+    mu = estimate_expected_returns(mu_prices, method=method)
+    # Drop benchmark (and any extras) so mu aligns with Sigma / active set
+    mu = mu.reindex(wp.columns)
+    if mu.isna().any():
+        mu = mu.fillna(float(mu.mean()) if mu.notna().any() else 0.0)
+    return mu
+
+
 def _build_target_weights(
     config: BacktestConfig,
     wp: pd.DataFrame,
@@ -187,8 +239,12 @@ def _build_target_weights(
             "method": "hrp",
         }
     else:
-        mu = estimate_expected_returns(wp, method=config.mu_method)
         sigma = estimate_covariance(wp, method=config.cov_method)
+        mu = _estimate_mu_for_active(
+            config=config,
+            wp=wp,
+            prices=prices,
+        )
         opt_result = optimize(
             mu=mu,
             sigma=sigma,
