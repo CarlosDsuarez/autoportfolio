@@ -2,21 +2,27 @@
 
 ## Fecha de definición: 2025-01-02 (inicio del periodo de backtest)
 
+## Universo actual
+
+- **Fuente**: [`universe.csv`](universe.csv)
+- **Tamaño**: **100** acciones de los principales componentes del S&P 500
+  (aprox. mega/large-caps por capitalización y liquidez)
+- **Cobertura**: 11 sectores GICS
+- **Sin ETFs** en esta revisión (el universo es equity S&P 500 puro)
+
 ## Criterios de inclusión
 
-### Acciones (mínimo 30)
-- **Market cap**: >= USD 10B (large cap) al momento de selección
-- **Volumen 30d promedio**: >= 1M acciones/día
-- **Diversificación sectorial**: mínimo 8 de 11 sectores GICS representados
-- **Historial**: >= 5 años de datos de precios ajustados disponibles
-- **Listado activo**: cotizando en NYSE o NASDAQ al inicio del periodo
+### Acciones (objetivo: 100)
+- **Universo base**: componentes principales del S&P 500
+- **Market cap**: large / mega cap
+- **Volumen 30d promedio**: >= 1M acciones/día (filtro adicional R-03 en runtime)
+- **Diversificación sectorial**: los 11 sectores GICS representados
+- **Historial**: >= 5 años de datos de precios ajustados disponibles (ideal)
+- **Listado activo**: cotizando en NYSE o NASDAQ
 
-### ETFs (mínimo 10)
-- **AUM**: >= USD 1B
-- **Volumen 30d promedio**: >= 500K acciones/día
-- **Diversificación**: cubrir equity (US, intl), renta fija, commodities, real estate
-- **Historial**: >= 5 años de datos disponibles
-- **Spread bid-ask**: <= 0.10% promedio
+### ETFs (opcional / legacy)
+- Versiones anteriores del universo incluían >= 10 ETFs de equity, renta fija
+  y commodities. La revisión a 100 tickers S&P 500 prioriza acciones.
 
 ## Mitigación de survivorship bias
 - Universo definido al inicio del periodo (point-in-time)
@@ -29,3 +35,4 @@
 - El universo se actualiza solo en las ventanas de reemplazo (trimestral)
 - Restricción R-03 (liquidez) aplica filtro dinámico adicional por ventana
 - Cap superior por activo: 30% (R-04, configurable)
+- Cargar con: `load_universe()` → `universe["ticker"].tolist()`

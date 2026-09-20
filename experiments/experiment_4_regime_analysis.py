@@ -27,36 +27,29 @@ import logging
 import pandas as pd
 import numpy as np
 
-from src.data_client import fetch_prices, fetch_volumes, clean_prices
+from src.data_client import load_universe, fetch_prices, fetch_volumes, clean_prices
 from src.backtest_engine import BacktestConfig, run_backtest
 from src.metrics_calculator import compute_metrics, compare_metrics
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger("exp4")
 
-TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-    "JPM", "BAC", "GS",
-    "JNJ", "PFE",
-    "XOM", "CVX",
-    "SPY", "QQQ", "TLT",
-]
+# Universo canónico: 100 principales del S&P 500 (universe.csv)
+TICKERS = load_universe()["ticker"].tolist()
 
 # Full history needed to include warmup before first regime
-START = "2016-01-01"
+START = "2022-01-01"
 END = "2023-12-31"
 
 REGIMES = {
-    "bull_2017_2019":   ("2017-01-01", "2019-12-31"),
-    "crash_2020_Q1":    ("2020-01-01", "2020-03-31"),
-    "recovery_2020_2021": ("2020-04-01", "2021-12-31"),
-    "bear_2022":        ("2022-01-01", "2022-12-31"),
-    "rebound_2023":     ("2023-01-01", "2023-12-31"),
+    "bear_2022":          ("2022-01-01", "2022-12-31"),
+    "rally_2023":         ("2023-01-01", "2023-12-31"),
+    "continuation_2024":  ("2024-01-01", "2024-12-31"),
 }
 
 BACKTEST_CONFIG = BacktestConfig(
     opt_method="mv_classic",
-    rebalance_freq="Q",
+    rebalance_freq="15D",
     window=252,
     warmup=252,
 )

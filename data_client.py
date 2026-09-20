@@ -49,21 +49,28 @@ def load_universe(path: str = None) -> pd.DataFrame:
 
     Args:
         path: Path to universe file (.csv or .xlsx).
-              Defaults to universe.csv in the same folder as this script.
+              Defaults to universe.csv next to this script, or at the
+              repository root.
 
     Returns:
         DataFrame with columns [ticker, asset_type, sector, name,
         inclusion_reason].
     """
     if path is None:
-        # Look for csv or xlsx next to this script
-        for candidate in (_HERE / "universe.csv", _HERE / "universe.xlsx"):
+        candidates = [
+            _HERE / "universe.csv",
+            _HERE / "universe.xlsx",
+            _HERE.parent / "universe.csv",
+            _HERE.parent / "universe.xlsx",
+        ]
+        for candidate in candidates:
             if candidate.exists():
                 path = str(candidate)
                 break
         else:
             raise FileNotFoundError(
-                f"No universe.csv or universe.xlsx found in {_HERE}"
+                f"No universe.csv or universe.xlsx found in {_HERE} "
+                f"or {_HERE.parent}"
             )
 
     p = Path(path)
@@ -201,7 +208,7 @@ def _load_csv_fallback(
 # ===================================================================
 def fetch_prices(
     tickers: list[str],
-    start: str = "2019-01-01",
+    start: str = "2022-01-01",
     end: str = "2025-01-01",
     csv_fallback_path: str = "data/raw_prices_backup.csv",
 ) -> pd.DataFrame:
@@ -400,7 +407,7 @@ def calc_liquidity_scores(
 
 def fetch_volumes(
     tickers: list[str],
-    start: str = "2019-01-01",
+    start: str = "2022-01-01",
     end: str = "2025-01-01",
 ) -> pd.DataFrame:
     """
@@ -433,7 +440,7 @@ def fetch_volumes(
 # ===================================================================
 def run_data_pipeline(
     universe_path: str = None,
-    start: str = "2019-01-01",
+    start: str = "2022-01-01",
     end: str = "2025-01-01",
     output_dir: str = "data",
 ) -> dict:

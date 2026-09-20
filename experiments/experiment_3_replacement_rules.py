@@ -27,7 +27,7 @@ import logging
 import pandas as pd
 import numpy as np
 
-from src.data_client import fetch_prices, fetch_volumes, clean_prices
+from src.data_client import load_universe, fetch_prices, fetch_volumes, clean_prices
 from src.backtest_engine import BacktestConfig, run_comparison
 from src.metrics_calculator import (
     compute_metrics, compare_metrics, bootstrap_sharpe_ci,
@@ -36,23 +36,16 @@ from src.metrics_calculator import (
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger("exp3")
 
-TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-    "JPM", "BAC", "GS",
-    "JNJ", "PFE",
-    "XOM", "CVX",
-    "SPY", "QQQ", "TLT",
-    "NVDA", "AMD",           # Extra candidates for replacement
-    "KO", "PEP", "WMT",
-]
-START = "2017-01-01"
+# Universo canónico: 100 principales del S&P 500 (universe.csv)
+TICKERS = load_universe()["ticker"].tolist()
+START = "2022-01-01"
 END = "2023-12-31"
 WARMUP = 252
 WINDOW = 252
-REBAL_FREQ = "Q"
+REBAL_FREQ = "15D"
 
-# Portfolio restricted to first 15 tickers; remaining 5 are replacement pool
-PORTFOLIO_TICKERS = TICKERS[:15]
+# Portfolio inicial = top 50 por orden del CSV; el resto es pool de reemplazo
+PORTFOLIO_TICKERS = TICKERS[:50]
 
 CONFIGS = {
     "no_replace": BacktestConfig(

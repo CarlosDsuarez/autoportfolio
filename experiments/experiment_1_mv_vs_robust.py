@@ -35,18 +35,13 @@ logger = logging.getLogger("exp1")
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META",
-    "JPM", "BAC", "GS",
-    "JNJ", "PFE",
-    "XOM", "CVX",
-    "SPY", "QQQ", "TLT",
-]
-START = "2017-01-01"
+# Universo canónico: 100 principales del S&P 500 (universe.csv)
+TICKERS = load_universe()["ticker"].tolist()
+START = "2022-01-01"
 END = "2023-12-31"
 WARMUP = 252
 WINDOW = 252
-REBAL_FREQ = "Q"
+REBAL_FREQ = "15D"
 
 CONFIGS = {
     "mv_classic": BacktestConfig(

@@ -25,6 +25,8 @@ OOS, reglas de reemplazo de activos y métricas de rendimiento con IC bootstrap.
 
 ```
 CM Project/
+├── universe.csv                  # Universo canónico: 100 principales S&P 500
+├── criterios.md                  # Criterios de selección del universo
 ├── src/                          # Código fuente principal
 │   ├── data_client.py            # Fase 1: descarga y limpieza de datos
 │   ├── rolling_engine.py         # Fase 2: ventanas rolling OOS
@@ -63,7 +65,8 @@ CM Project/
 │   ├── test_signal_stack.py
 │   ├── test_hrp_sizing.py
 │   ├── test_conviction_scoring.py
-│   └── test_tail_risk_overlay.py
+│   ├── test_tail_risk_overlay.py
+│   └── test_universe.py
 ├── experiments/                  # Scripts de experimentos
 │   ├── experiment_1_mv_vs_robust.py
 │   ├── experiment_2_transaction_costs.py
@@ -129,29 +132,59 @@ result = run_backtest(prices, volumes, cfg)
 ## Instalación
 
 ### Requisitos del sistema
-- Python 3.10+
-- pip
+- Python 3.10+ (en Ubuntu/Debian: `python3` y `python3-venv`)
+- **No** uses `pip install` sobre el Python del sistema (PEP 668)
 
-### Clonar e instalar
+### Clonar e instalar (venv)
 
 ```bash
 git clone <repo-url>
-cd "CM Project"
+cd autoportfolio   # o el nombre de tu carpeta local
+
+# Crear entorno virtual (evita "externally-managed-environment")
+sudo apt install -y python3-venv   # solo si falla: ensurepip is not available
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -U pip
 pip install -r requirements.txt
+
+# Descargar y limpiar los 100 tickers desde 2022 → data/
+python -m src.data_client
 ```
 
-### `requirements.txt`
+### Backtest histórico vs “bot” cada 15 días
 
+Hay **dos modos** distintos:
+
+| Modo | Qué hace | Cómo se corre |
+|------|----------|---------------|
+| **Backtest** | Simula el pasado (desde 2022) rebalanceando cada 15 días hábiles | `python -m src.data_client` + `run_backtest(..., rebalance_freq="15D")` |
+| **Periódico (live sim)** | Un solo rebalanceo “hoy” si ya pasaron 15 días hábiles; guarda estado en `data/live_state/` | `python -m scripts.run_periodic_rebalance` |
+
+**Importante:** nada se ejecuta solo en la nube. GitHub guarda código; el Cloud Agent / tu PC ejecutan comandos. Para automatizar, usa cron en una máquina que tengas encendida:
+
+```bash
+# Cada día laborable a las 16:00; el script decide si ya tocan 15D
+0 16 * * 1-5 cd /path/to/autoportfolio && .venv/bin/python -m scripts.run_periodic_rebalance
 ```
-cvxpy==1.8.2
-numpy==1.26.4
-pandas==2.2.2
-scikit-learn==1.5.1
-scipy==1.13.1
-yfinance==0.2.40
-plotly==5.22.0
-matplotlib==3.9.0
-pytest==8.2.2
+
+```bash
+# Primera vez (fuerza el primer rebalanceo)
+python -m scripts.run_periodic_rebalance --force
+
+# Después, en días normales:
+python -m scripts.run_periodic_rebalance
+
+# Solo preguntar si toca (exit 0 = sí):
+python -m scripts.run_periodic_rebalance --check-only
+```
+
+En cada terminal nueva:
+
+```bash
+cd autoportfolio
+source .venv/bin/activate
 ```
 
 ---
@@ -161,26 +194,28 @@ pytest==8.2.2
 ### Backtest mínimo
 
 ```python
-from src.data_client import fetch_prices, fetch_volumes, clean_prices
+from src.data_client import load_universe, fetch_prices, fetch_volumes, clean_prices
 from src.backtest_engine import BacktestConfig, run_backtest
 from src.metrics_calculator import compute_metrics
 
-# 1. Descargar datos
-tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "QQQ", "TLT"]
-prices_raw = fetch_prices(tickers, start="2019-01-01", end="2023-12-31")
-volumes_raw = fetch_volumes(tickers, start="2019-01-01", end="2023-12-31")
+# 1. Universo canónico: 100 principales del S&P 500 (universe.csv)
+tickers = load_universe()["ticker"].tolist()
+prices_raw = fetch_prices(tickers, start="2022-01-01", end="2025-01-01")
+volumes_raw = fetch_volumes(tickers, start="2022-01-01", end="2025-01-01")
 prices, _ = clean_prices(prices_raw)
 volumes = volumes_raw.reindex(prices.index).ffill().fillna(1e6)
 
-# 2. Configurar backtest
+# 2. Configurar backtest (rebalanceo cada 15 días hábiles)
 config = BacktestConfig(
-    opt_method="mv_classic",   # "mv_classic" | "robust" | "mv_tc" | ...
-    rebalance_freq="Q",        # "M" | "Q"
-    window=252,                # días de entrenamiento
-    warmup=252,                # días de warmup inicial
-    max_weight=0.30,           # máximo peso por activo
-    turnover_limit=0.20,       # límite de turnover por rebalanceo
-    seed=42,                   # reproducibilidad
+    opt_method="hrp",          # o "mv_classic" | "robust" | ...
+    rebalance_freq="15D",      # "M" | "Q" | "15D"
+    window=252,
+    warmup=252,
+    use_signal_stack=True,
+    use_position_ledger=True,
+    max_weight=0.30,
+    turnover_limit=0.20,
+    seed=42,
 )
 
 # 3. Ejecutar backtest

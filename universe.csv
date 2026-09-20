@@ -1,48 +1,101 @@
 ticker,asset_type,sector,name,inclusion_reason
-AAPL,stock,Technology,Apple Inc,Large cap tech leader
-MSFT,stock,Technology,Microsoft Corp,Large cap tech leader
-GOOGL,stock,Communication Services,Alphabet Inc,Mega cap communication
-AMZN,stock,Consumer Discretionary,Amazon.com Inc,Mega cap e-commerce/cloud
-NVDA,stock,Technology,NVIDIA Corp,Semiconductor leader
-META,stock,Communication Services,Meta Platforms Inc,Social media mega cap
-JPM,stock,Financials,JPMorgan Chase & Co,Largest US bank
-JNJ,stock,Healthcare,Johnson & Johnson,Healthcare conglomerate
-V,stock,Financials,Visa Inc,Payment network leader
-PG,stock,Consumer Staples,Procter & Gamble Co,Consumer staples leader
-UNH,stock,Healthcare,UnitedHealth Group Inc,Health insurance leader
-HD,stock,Consumer Discretionary,Home Depot Inc,Home improvement retail
-MA,stock,Financials,Mastercard Inc,Payment network
-XOM,stock,Energy,Exxon Mobil Corp,Integrated oil & gas
-CVX,stock,Energy,Chevron Corp,Integrated oil & gas
-PFE,stock,Healthcare,Pfizer Inc,Pharma large cap
-ABBV,stock,Healthcare,AbbVie Inc,Pharma large cap
-KO,stock,Consumer Staples,Coca-Cola Co,Consumer staples
-PEP,stock,Consumer Staples,PepsiCo Inc,Consumer staples
-COST,stock,Consumer Staples,Costco Wholesale Corp,Retail large cap
-TMO,stock,Healthcare,Thermo Fisher Scientific,Life sciences
-AVGO,stock,Technology,Broadcom Inc,Semiconductor
-LLY,stock,Healthcare,Eli Lilly & Co,Pharma large cap
-WMT,stock,Consumer Staples,Walmart Inc,Retail mega cap
-MRK,stock,Healthcare,Merck & Co Inc,Pharma large cap
-CSCO,stock,Technology,Cisco Systems Inc,Networking equipment
-ACN,stock,Technology,Accenture plc,IT consulting
-NEE,stock,Utilities,NextEra Energy Inc,Utility leader
-LIN,stock,Materials,Linde plc,Industrial gases
-AMT,stock,Real Estate,American Tower Corp,REIT cell towers
-CRM,stock,Technology,Salesforce Inc,Cloud CRM leader
-CAT,stock,Industrials,Caterpillar Inc,Industrial machinery
-GE,stock,Industrials,GE Aerospace,Aerospace & defense
-UPS,stock,Industrials,United Parcel Service,Logistics
-DE,stock,Industrials,Deere & Co,Agricultural machinery
-SPY,etf,Broad US Equity,SPDR S&P 500 ETF Trust,Benchmark US large cap
-QQQ,etf,US Tech Equity,Invesco QQQ Trust,Nasdaq 100 tracker
-IWM,etf,US Small Cap,iShares Russell 2000 ETF,Small cap exposure
-EFA,etf,Intl Developed,iShares MSCI EAFE ETF,International developed
-EEM,etf,Intl Emerging,iShares MSCI Emerging Markets ETF,Emerging markets
-AGG,etf,US Bonds,iShares Core US Aggregate Bond ETF,US investment grade bonds
-TLT,etf,US Long Bonds,iShares 20+ Year Treasury Bond ETF,Long duration treasuries
-GLD,etf,Commodities,SPDR Gold Shares,Gold exposure
-VNQ,etf,Real Estate,Vanguard Real Estate ETF,US REIT exposure
-LQD,etf,Corporate Bonds,iShares iBoxx Investment Grade Corp Bond ETF,Corporate bonds
-HYG,etf,High Yield Bonds,iShares iBoxx High Yield Corp Bond ETF,High yield bonds
-DBC,etf,Commodities,Invesco DB Commodity Index Tracking Fund,Broad commodities
+AAPL,stock,Technology,Apple Inc,S&P 500 mega-cap
+MSFT,stock,Technology,Microsoft Corp,S&P 500 mega-cap
+NVDA,stock,Technology,NVIDIA Corp,S&P 500 mega-cap
+AMZN,stock,Consumer Discretionary,Amazon.com Inc,S&P 500 mega-cap
+META,stock,Communication Services,Meta Platforms Inc,S&P 500 mega-cap
+GOOGL,stock,Communication Services,Alphabet Inc Class A,S&P 500 mega-cap
+BRK-B,stock,Financials,Berkshire Hathaway Inc Class B,S&P 500 mega-cap
+LLY,stock,Healthcare,Eli Lilly & Co,S&P 500 mega-cap
+AVGO,stock,Technology,Broadcom Inc,S&P 500 mega-cap
+JPM,stock,Financials,JPMorgan Chase & Co,S&P 500 mega-cap
+TSLA,stock,Consumer Discretionary,Tesla Inc,S&P 500 mega-cap
+UNH,stock,Healthcare,UnitedHealth Group Inc,S&P 500 mega-cap
+XOM,stock,Energy,Exxon Mobil Corp,S&P 500 mega-cap
+V,stock,Financials,Visa Inc,S&P 500 mega-cap
+MA,stock,Financials,Mastercard Inc,S&P 500 mega-cap
+JNJ,stock,Healthcare,Johnson & Johnson,S&P 500 mega-cap
+PG,stock,Consumer Staples,Procter & Gamble Co,S&P 500 mega-cap
+HD,stock,Consumer Discretionary,Home Depot Inc,S&P 500 mega-cap
+COST,stock,Consumer Staples,Costco Wholesale Corp,S&P 500 mega-cap
+ABBV,stock,Healthcare,AbbVie Inc,S&P 500 mega-cap
+WMT,stock,Consumer Staples,Walmart Inc,S&P 500 mega-cap
+MRK,stock,Healthcare,Merck & Co Inc,S&P 500 mega-cap
+CVX,stock,Energy,Chevron Corp,S&P 500 mega-cap
+CRM,stock,Technology,Salesforce Inc,S&P 500 large-cap
+BAC,stock,Financials,Bank of America Corp,S&P 500 large-cap
+KO,stock,Consumer Staples,Coca-Cola Co,S&P 500 large-cap
+PEP,stock,Consumer Staples,PepsiCo Inc,S&P 500 large-cap
+TMO,stock,Healthcare,Thermo Fisher Scientific Inc,S&P 500 large-cap
+CSCO,stock,Technology,Cisco Systems Inc,S&P 500 large-cap
+ACN,stock,Technology,Accenture plc,S&P 500 large-cap
+MCD,stock,Consumer Discretionary,McDonald's Corp,S&P 500 large-cap
+LIN,stock,Materials,Linde plc,S&P 500 large-cap
+ABT,stock,Healthcare,Abbott Laboratories,S&P 500 large-cap
+WFC,stock,Financials,Wells Fargo & Co,S&P 500 large-cap
+DHR,stock,Healthcare,Danaher Corp,S&P 500 large-cap
+ADBE,stock,Technology,Adobe Inc,S&P 500 large-cap
+TXN,stock,Technology,Texas Instruments Inc,S&P 500 large-cap
+PM,stock,Consumer Staples,Philip Morris International,S&P 500 large-cap
+ORCL,stock,Technology,Oracle Corp,S&P 500 large-cap
+CAT,stock,Industrials,Caterpillar Inc,S&P 500 large-cap
+GE,stock,Industrials,GE Aerospace,S&P 500 large-cap
+IBM,stock,Technology,International Business Machines,S&P 500 large-cap
+QCOM,stock,Technology,QUALCOMM Inc,S&P 500 large-cap
+AMGN,stock,Healthcare,Amgen Inc,S&P 500 large-cap
+INTU,stock,Technology,Intuit Inc,S&P 500 large-cap
+ISRG,stock,Healthcare,Intuitive Surgical Inc,S&P 500 large-cap
+AMD,stock,Technology,Advanced Micro Devices Inc,S&P 500 large-cap
+PFE,stock,Healthcare,Pfizer Inc,S&P 500 large-cap
+SPGI,stock,Financials,S&P Global Inc,S&P 500 large-cap
+BX,stock,Financials,Blackstone Inc,S&P 500 large-cap
+NOW,stock,Technology,ServiceNow Inc,S&P 500 large-cap
+GS,stock,Financials,Goldman Sachs Group Inc,S&P 500 large-cap
+DIS,stock,Communication Services,Walt Disney Co,S&P 500 large-cap
+UBER,stock,Industrials,Uber Technologies Inc,S&P 500 large-cap
+NEE,stock,Utilities,NextEra Energy Inc,S&P 500 large-cap
+RTX,stock,Industrials,RTX Corp,S&P 500 large-cap
+T,stock,Communication Services,AT&T Inc,S&P 500 large-cap
+LOW,stock,Consumer Discretionary,Lowe's Companies Inc,S&P 500 large-cap
+PGR,stock,Financials,Progressive Corp,S&P 500 large-cap
+UNP,stock,Industrials,Union Pacific Corp,S&P 500 large-cap
+BLK,stock,Financials,BlackRock Inc,S&P 500 large-cap
+SYK,stock,Healthcare,Stryker Corp,S&P 500 large-cap
+HON,stock,Industrials,Honeywell International Inc,S&P 500 large-cap
+BKNG,stock,Consumer Discretionary,Booking Holdings Inc,S&P 500 large-cap
+VRTX,stock,Healthcare,Vertex Pharmaceuticals Inc,S&P 500 large-cap
+TJX,stock,Consumer Discretionary,TJX Companies Inc,S&P 500 large-cap
+AXP,stock,Financials,American Express Co,S&P 500 large-cap
+MS,stock,Financials,Morgan Stanley,S&P 500 large-cap
+C,stock,Financials,Citigroup Inc,S&P 500 large-cap
+AMAT,stock,Technology,Applied Materials Inc,S&P 500 large-cap
+SCHW,stock,Financials,Charles Schwab Corp,S&P 500 large-cap
+ADP,stock,Industrials,Automatic Data Processing Inc,S&P 500 large-cap
+NKE,stock,Consumer Discretionary,NIKE Inc,S&P 500 large-cap
+PLD,stock,Real Estate,Prologis Inc,S&P 500 large-cap
+MDT,stock,Healthcare,Medtronic plc,S&P 500 large-cap
+ETN,stock,Industrials,Eaton Corp plc,S&P 500 large-cap
+CB,stock,Financials,Chubb Ltd,S&P 500 large-cap
+BA,stock,Industrials,Boeing Co,S&P 500 large-cap
+LMT,stock,Industrials,Lockheed Martin Corp,S&P 500 large-cap
+SBUX,stock,Consumer Discretionary,Starbucks Corp,S&P 500 large-cap
+DE,stock,Industrials,Deere & Co,S&P 500 large-cap
+MMC,stock,Financials,Marsh & McLennan Companies,S&P 500 large-cap
+BMY,stock,Healthcare,Bristol-Myers Squibb Co,S&P 500 large-cap
+GILD,stock,Healthcare,Gilead Sciences Inc,S&P 500 large-cap
+AMT,stock,Real Estate,American Tower Corp,S&P 500 large-cap
+ADI,stock,Technology,Analog Devices Inc,S&P 500 large-cap
+PANW,stock,Technology,Palo Alto Networks Inc,S&P 500 large-cap
+COP,stock,Energy,ConocoPhillips,S&P 500 large-cap
+CMCSA,stock,Communication Services,Comcast Corp,S&P 500 large-cap
+REGN,stock,Healthcare,Regeneron Pharmaceuticals Inc,S&P 500 large-cap
+SO,stock,Utilities,Southern Co,S&P 500 large-cap
+ELV,stock,Healthcare,Elevance Health Inc,S&P 500 large-cap
+MU,stock,Technology,Micron Technology Inc,S&P 500 large-cap
+KLAC,stock,Technology,KLA Corp,S&P 500 large-cap
+EQIX,stock,Real Estate,Equinix Inc,S&P 500 large-cap
+DUK,stock,Utilities,Duke Energy Corp,S&P 500 large-cap
+SHW,stock,Materials,Sherwin-Williams Co,S&P 500 large-cap
+MO,stock,Consumer Staples,Altria Group Inc,S&P 500 large-cap
+CI,stock,Healthcare,The Cigna Group,S&P 500 large-cap
+BSX,stock,Healthcare,Boston Scientific Corp,S&P 500 large-cap
