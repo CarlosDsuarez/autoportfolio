@@ -631,3 +631,99 @@ class TestFase6Backtest:
         assert all(s.nav > 0 for s in result.ledger_snapshots)
         # Final NAV finite
         assert np.isfinite(result.nav.iloc[-1])
+
+
+class TestClassicPathRebalanceDayPnL:
+    """Regression: classic path must mark-to-market with pre-rebalance weights."""
+
+    def test_rebalance_day_return_uses_prior_holdings(self, monkeypatch):
+        """Holding A through an A +10% day, then switching to B, must keep the +10%.
+
+        Bug: updating w_current before computing t_prev→t return attributed the
+        jump to post-rebalance weights (B flat → 0% day, silent P&L wipe).
+        """
+        idx = pd.bdate_range("2024-01-02", periods=5)
+        prices = pd.DataFrame(
+            {
+                "A": [100.0, 100.0, 100.0, 110.0, 110.0],
+                "B": [100.0, 100.0, 100.0, 100.0, 100.0],
+            },
+            index=idx,
+        )
+        volumes = pd.DataFrame(
+            {c: 1_000_000.0 for c in prices.columns}, index=idx
+        )
+
+        forced = [idx[1], idx[3]]
+        targets = {
+            idx[1]: pd.Series({"A": 1.0, "B": 0.0}),
+            idx[3]: pd.Series({"A": 0.0, "B": 1.0}),
+        }
+
+        import src.backtest_engine as be
+        import src.universe_filter as uf
+        import src.rebalancing_engine as reb
+
+        monkeypatch.setattr(
+            be, "get_rebalance_dates", lambda *a, **k: list(forced)
+        )
+        monkeypatch.setattr(
+            be,
+            "get_window",
+            lambda prices, t, window=252: prices.loc[prices.index <= t].iloc[
+                -min(window, (prices.index <= t).sum()) :
+            ],
+        )
+        monkeypatch.setattr(
+            uf,
+            "filter_universe_at_date",
+            lambda t, prices, volumes, **kw: (list(prices.columns), pd.DataFrame()),
+        )
+        monkeypatch.setattr(
+            uf,
+            "precompute_rolling_metrics",
+            lambda p, v, window=30: (p * 0.0, v * 0.0 + 1e6),
+        )
+
+        def _fake_build(config, wp, prices, volumes, t, active_clean, w_prev):
+            return (
+                targets[t].reindex(active_clean).fillna(0.0),
+                {"expected_sharpe": 0.0, "converged": True, "method": "test"},
+                None,
+            )
+
+        monkeypatch.setattr(be, "_build_target_weights", _fake_build)
+
+        def _fake_rebalance(**kwargs):
+            class _R:
+                pass
+
+            r = _R()
+            wt = kwargs["w_target"].astype(float)
+            r.w_new = wt / wt.sum()
+            r.actual_turnover = 1.0
+            r.cost = 0.0
+            return r
+
+        monkeypatch.setattr(reb, "rebalance", _fake_rebalance)
+
+        cfg = BacktestConfig(
+            warmup=0,
+            window=2,
+            rebalance_freq="15D",
+            turnover_limit=2.0,
+            commission_bps=0.0,
+            spread_bps=0.0,
+            impact_coef=0.0,
+            replacement_rule="none",
+            use_position_ledger=False,
+            max_weight=1.0,
+            tc_lambda=0.0,
+            initial_nav=1_000_000.0,
+        )
+        result = be.run_backtest(prices, volumes, cfg)
+
+        # After A's +10% day (idx[3]), NAV must reflect the gain before
+        # switching into B — not stay flat at the initial NAV.
+        assert result.nav.loc[idx[3]] == pytest.approx(1_100_000.0, rel=1e-9)
+        assert result.nav.iloc[-1] == pytest.approx(1_100_000.0, rel=1e-9)
