@@ -318,6 +318,30 @@ class TestUniverseFilter:
             assert "ticker" in log.columns
             assert "reason" in log.columns
 
+    def test_nan_avg_volume_excluded(self, prices, volumes):
+        """NaN volume series must not pass the min-volume filter.
+
+        `NaN < min_volume` is False in pandas, so a bare comparison left
+        broken volume columns in the active set.
+        """
+        volumes_bad = volumes.copy()
+        broken = volumes_bad.columns[0]
+        volumes_bad[broken] = np.nan
+        t = prices.index[-1]
+        ami, vol = precompute_rolling_metrics(prices, volumes_bad, window=30)
+        active, log = filter_universe_at_date(
+            t,
+            prices,
+            volumes_bad,
+            rolling_amihud=ami,
+            rolling_avg_vol=vol,
+            min_volume=100_000,
+        )
+        assert broken not in active
+        assert not log.empty
+        assert broken in set(log["ticker"])
+        assert any("non-finite" in str(r) for r in log["reason"])
+
     def test_precompute_metrics_shape(self, prices, volumes):
         r_amihud, r_vol = precompute_rolling_metrics(
             prices, volumes, window=30

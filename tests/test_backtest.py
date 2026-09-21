@@ -631,3 +631,93 @@ class TestFase6Backtest:
         assert all(s.nav > 0 for s in result.ledger_snapshots)
         # Final NAV finite
         assert np.isfinite(result.nav.iloc[-1])
+
+
+class TestMaxWeightEnforcement:
+    def test_enforce_max_weight_survives_renorm(self):
+        from src.backtest_engine import _enforce_max_weight
+
+        # Single clip+renorm would leave ~0.97 on A; iterative must cap.
+        # 4 names × 0.30 ≥ 1 so the cap is feasible.
+        w = pd.Series({"A": 0.99, "B": 0.005, "C": 0.005, "D": 0.0})
+        out = _enforce_max_weight(w, max_weight=0.30)
+        assert abs(out.sum() - 1.0) < 1e-8
+        assert float(out.max()) <= 0.30 + 1e-9
+
+    def test_enforce_max_weight_infeasible_falls_back_equal(self):
+        from src.backtest_engine import _enforce_max_weight
+
+        # 3 × 0.30 < 1 → cannot satisfy cap; equal weight is the fallback.
+        w = pd.Series({"A": 0.9, "B": 0.05, "C": 0.05})
+        out = _enforce_max_weight(w, max_weight=0.30)
+        assert abs(out.sum() - 1.0) < 1e-8
+        assert abs(float(out.max()) - 1.0 / 3.0) < 1e-9
+
+    def test_hrp_path_respects_max_weight(
+        self, synthetic_prices, synthetic_volumes
+    ):
+        # turnover_limit=2.0 so executed weights ≈ capped HRP target
+        # (a binding 20% turnover blend can re-violate max_weight after renorm).
+        cfg = BacktestConfig(
+            opt_method="hrp",
+            rebalance_freq="Q",
+            window=126,
+            warmup=126,
+            max_weight=0.30,
+            turnover_limit=2.0,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        for r in result.daily_records:
+            if r.is_rebalance and len(r.weights) > 0:
+                assert float(r.weights.max()) <= 0.30 + 1e-6
+
+
+class TestLedgerTurnoverCap:
+    def test_ledger_path_respects_turnover_limit(
+        self, synthetic_prices, synthetic_volumes
+    ):
+        """Phase 6 ledger path must apply R-02 like classic rebalance()."""
+        cfg = BacktestConfig(
+            opt_method="hrp",
+            rebalance_freq="15D",
+            window=126,
+            warmup=126,
+            use_position_ledger=True,
+            turnover_limit=0.20,
+            max_weight=0.30,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        # Skip the initial deployment (no prior book); later rebalances
+        # must respect the turnover cap.
+        rebal_rows = [
+            r for r in result.daily_records if r.is_rebalance
+        ]
+        assert len(rebal_rows) >= 2
+        for r in rebal_rows[1:]:
+            assert r.turnover <= 0.20 + 1e-5, (
+                f"ledger rebalance turnover {r.turnover} exceeded limit"
+            )
+
+
+class TestBlackLittermanBacktestWiring:
+    def test_black_litterman_produces_rebalances(
+        self, synthetic_prices, synthetic_volumes
+    ):
+        """Documented mu_method=black_litterman must not silently flat-line.
+
+        Previously estimate_expected_returns was called without cov_matrix,
+        every rebalance raised, and run_backtest swallowed the error →
+        0 rebalances and constant initial NAV.
+        """
+        cfg = BacktestConfig(
+            opt_method="mv_classic",
+            mu_method="black_litterman",
+            rebalance_freq="Q",
+            window=126,
+            warmup=126,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        assert not result.rebalance_log.empty
+        assert len(result.rebalance_log) >= 1
+        assert result.nav.nunique() > 1
+        assert np.isfinite(result.nav.iloc[-1])

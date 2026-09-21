@@ -38,7 +38,7 @@ from src.expected_returns import estimate_expected_returns
 from src.covariance_estimators import estimate_covariance
 from src.universe_filter import filter_universe_at_date
 from src.portfolio_optimizer import optimize
-from src.rebalancing_engine import rebalance
+from src.rebalancing_engine import rebalance, _apply_turnover_cap
 
 if TYPE_CHECKING:
     from src.position_ledger import LedgerSnapshot
@@ -130,6 +130,57 @@ def _estimate_cost_fraction(
     return turnover * (bps / 10_000.0)
 
 
+def _enforce_max_weight(
+    weights: pd.Series,
+    max_weight: float,
+) -> pd.Series:
+    """Project long-only weights onto the max-weight simplex.
+
+    A single clip-then-renormalize pass can re-violate ``max_weight``
+    (e.g. HRP [0.99, 0.01] with cap 0.30 → clip [0.30, 0.01] → renorm
+    ≈ [0.97, 0.03]). Excess from capped names is redistributed equally
+    across names still below the cap. If ``n * max_weight < 1``, fall
+    back to equal weight.
+    """
+    w = weights.fillna(0.0).clip(lower=0.0).astype(float)
+    if w.empty:
+        return w
+    n = len(w)
+    if max_weight <= 0:
+        return pd.Series(1.0 / n, index=w.index)
+    if n * max_weight < 1.0 - 1e-12:
+        return pd.Series(1.0 / n, index=w.index)
+
+    total = float(w.sum())
+    if total <= 1e-12:
+        return pd.Series(1.0 / n, index=w.index)
+    w = w / total
+
+    for _ in range(n + 5):
+        over = w > max_weight + 1e-12
+        if not bool(over.any()):
+            return w
+        excess = float((w[over] - max_weight).sum())
+        w = w.copy()
+        w[over] = max_weight
+        under = w < max_weight - 1e-12
+        n_under = int(under.sum())
+        if n_under == 0 or excess <= 1e-15:
+            break
+        # Equal share to all under-cap names (including current zeros)
+        # so mass is not trapped on a subset that then re-breaches.
+        w[under] = w[under] + excess / n_under
+
+    total = float(w.sum())
+    if total <= 1e-12:
+        return pd.Series(1.0 / n, index=w.index)
+    w = w / total
+    # Final safety clip if float dust remains
+    if float(w.max()) > max_weight + 1e-9:
+        return pd.Series(1.0 / n, index=w.index)
+    return w
+
+
 def _build_target_weights(
     config: BacktestConfig,
     wp: pd.DataFrame,
@@ -178,17 +229,20 @@ def _build_target_weights(
         w_target = w_target / s if s > 1e-10 else pd.Series(
             np.ones(len(active_clean)) / len(active_clean), index=active_clean,
         )
-        # Soft max-weight cap
-        w_target = w_target.clip(upper=config.max_weight)
-        w_target = w_target / w_target.sum()
+        w_target = _enforce_max_weight(w_target, config.max_weight)
         opt_meta = {
             "expected_sharpe": 0.0,
             "converged": True,
             "method": "hrp",
         }
     else:
-        mu = estimate_expected_returns(wp, method=config.mu_method)
+        # Covariance first: black_litterman requires cov_matrix. Estimating
+        # mu without it raised every rebalance, which run_backtest swallowed
+        # → silent flat NAV / zero rebalances for a documented mu_method.
         sigma = estimate_covariance(wp, method=config.cov_method)
+        mu = estimate_expected_returns(
+            wp, method=config.mu_method, cov_matrix=sigma,
+        )
         opt_result = optimize(
             mu=mu,
             sigma=sigma,
@@ -210,9 +264,7 @@ def _build_target_weights(
     if conviction is not None:
         from src.conviction_scoring import conviction_to_tilts
         w_target = conviction_to_tilts(conviction, base_weights=w_target)
-        # Re-apply max weight
-        w_target = w_target.clip(upper=config.max_weight)
-        w_target = w_target / w_target.sum() if w_target.sum() > 1e-10 else w_target
+        w_target = _enforce_max_weight(w_target, config.max_weight)
 
     return w_target, opt_meta, regime_state
 
@@ -358,26 +410,35 @@ def run_backtest(
                     prices_t = prices.loc[t]
                     nav_pre = ledger.nav(prices_t)
                     if w_prev is None:
+                        # Initial cash deployment: no prior book to turn over
                         w_prev_exec = pd.Series(0.0, index=active_clean)
+                        w_exec = w_target
                     else:
                         w_prev_exec = w_prev
+                        # R-02: ledger path previously skipped the turnover
+                        # cap used by rebalance(), allowing full book flips.
+                        w_exec = _apply_turnover_cap(
+                            w_prev_exec, w_target, config.turnover_limit,
+                        )
 
                     # Approximate turnover cost before applying trades
                     cost_frac = _estimate_cost_fraction(
-                        w_prev_exec, w_target,
+                        w_prev_exec, w_exec,
                         config.commission_bps, config.spread_bps,
                     )
                     cost_abs = cost_frac * max(nav_pre, 1e-6)
                     turnover_today = float(
-                        (w_target.reindex(w_prev_exec.index).fillna(0.0)
+                        (w_exec.reindex(w_prev_exec.index).fillna(0.0)
                          - w_prev_exec).abs().sum()
                     )
                     # Also count new names
-                    extra = w_target.index.difference(w_prev_exec.index)
-                    turnover_today += float(w_target.reindex(extra).fillna(0.0).abs().sum())
+                    extra = w_exec.index.difference(w_prev_exec.index)
+                    turnover_today += float(
+                        w_exec.reindex(extra).fillna(0.0).abs().sum()
+                    )
 
                     trades = ledger.trades_from_target_weights(
-                        w_target, prices_t, nav=nav_pre,
+                        w_exec, prices_t, nav=nav_pre,
                     )
                     ledger.apply_trades(
                         trades, prices_t, costs=cost_abs, t=t,

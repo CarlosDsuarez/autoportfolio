@@ -226,9 +226,13 @@ def execute_rebalance(
     # Current prices (strictly before t, R-05)
     p_current = prices[prices.index < t].iloc[-1].reindex(tickers).fillna(100.0)
 
-    # ADV
+    # ADV — missing/non-positive must NOT become a tiny positive sentinel.
+    # fillna(portfolio_value * 0.001) made abs_order/adv explode (e.g. $1k
+    # fake ADV on a $1M book) and could wipe NAV via market-impact costs.
+    # Non-finite ADV → 0.0, which disables impact in execute_order_twap.
     adv = compute_adv(volumes, prices, t, window=adv_window)
-    adv = adv.reindex(tickers).fillna(portfolio_value * 0.001)
+    adv = adv.reindex(tickers)
+    adv = adv.where(np.isfinite(adv) & (adv > 1e-6), other=0.0)
 
     orders: Dict[str, OrderResult] = {}
     for tk in tickers:
