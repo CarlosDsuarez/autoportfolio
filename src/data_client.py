@@ -304,8 +304,18 @@ def clean_prices(
         )
         clean = clean.drop(columns=bad_tickers)
 
-    # --- Step 4: drop remaining NaN rows ---
-    clean = clean.dropna()
+    # --- Step 4: residual NaNs — drop incomplete tickers, never dates ---
+    # dropna() on rows would remove calendar sessions and make the next
+    # surviving dates adjacent. Downstream pct_change / log-returns then
+    # treat multi-session gaps as single-day moves (silent return corruption).
+    still_nan = clean.columns[clean.isna().any()].tolist()
+    if still_nan:
+        logger.warning(
+            "Dropping tickers with residual NaNs after ffill/interpolate: %s",
+            still_nan,
+        )
+        clean = clean.drop(columns=still_nan)
+    clean = clean.dropna(how="all")
 
     # --- Quality report ---
     report_rows = []
