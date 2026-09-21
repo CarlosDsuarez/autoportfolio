@@ -631,3 +631,55 @@ class TestFase6Backtest:
         assert all(s.nav > 0 for s in result.ledger_snapshots)
         # Final NAV finite
         assert np.isfinite(result.nav.iloc[-1])
+
+
+class TestCapmShrunkActiveWindow:
+    """Regression: capm_shrunk must not silently flatline the backtest."""
+
+    def test_capm_without_spy_in_universe_still_rebalances(
+        self, synthetic_prices, synthetic_volumes
+    ):
+        """Stock-only panel (no SPY) previously raised every rebalance.
+
+        run_backtest swallowed the ValueError → 0 rebalances, constant NAV.
+        Fallback to historical mu must keep the backtest alive.
+        """
+        assert "SPY" not in synthetic_prices.columns
+        cfg = BacktestConfig(
+            opt_method="mv_classic",
+            mu_method="capm_shrunk",
+            rebalance_freq="Q",
+            window=126,
+            warmup=126,
+        )
+        result = run_backtest(synthetic_prices, synthetic_volumes, cfg)
+        assert not result.rebalance_log.empty
+        assert abs(float(result.nav.iloc[-1]) - cfg.initial_nav) > 1.0
+
+    def test_capm_uses_spy_outside_active_set(self):
+        """SPY filtered out of active investable set must still estimate betas."""
+        rng = np.random.default_rng(7)
+        dates = pd.bdate_range("2020-01-01", periods=320)
+        cols = ["A", "B", "C", "D", "SPY"]
+        prices = pd.DataFrame(
+            100.0 * np.exp(np.cumsum(rng.normal(0.0004, 0.01, (len(dates), 5)), axis=0)),
+            index=dates,
+            columns=cols,
+        )
+        volumes = pd.DataFrame(1e6, index=dates, columns=cols)
+        # Make SPY look illiquid so the universe filter drops it from active
+        volumes["SPY"] = 1.0
+
+        cfg = BacktestConfig(
+            opt_method="mv_classic",
+            mu_method="capm_shrunk",
+            rebalance_freq="Q",
+            window=126,
+            warmup=126,
+            max_weight=0.45,
+        )
+        result = run_backtest(prices, volumes, cfg, universe=["A", "B", "C", "D", "SPY"])
+        assert not result.rebalance_log.empty
+        # At least one successful rebalance must have run (not silent flatline)
+        assert len(result.rebalance_log) >= 1
+        assert abs(float(result.nav.iloc[-1]) - cfg.initial_nav) > 1.0
