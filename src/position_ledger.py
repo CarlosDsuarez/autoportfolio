@@ -105,6 +105,26 @@ class PositionLedger:
             return pd.Series(dtype=float)
         return pd.Series(data, dtype=float)
 
+    def _mark_prices(self, prices: pd.Series, pos: pd.Series) -> pd.Series:
+        """Return finite mark prices for every held ticker.
+
+        Raises:
+            ValueError: If any held ticker is missing or has a non-finite/non-positive price.
+                Silent zero-fills would wipe NAV / unrealized PnL for those holdings.
+        """
+        px = prices.reindex(pos.index)
+        bad = [
+            str(tk)
+            for tk, p in px.items()
+            if not (np.isfinite(p) and float(p) > 0.0)
+        ]
+        if bad:
+            raise ValueError(
+                "Missing or invalid mark price for held ticker(s): "
+                + ", ".join(bad)
+            )
+        return px.astype(float)
+
     def nav(self, prices: pd.Series) -> float:
         """Mark-to-market NAV = cash + Σ shares_i * price_i.
 
@@ -113,12 +133,14 @@ class PositionLedger:
 
         Returns:
             Total NAV as float.
+
+        Raises:
+            ValueError: If any open position lacks a valid mark price.
         """
         pos = self.positions()
         if pos.empty:
             return float(self.cash)
-        aligned = pos.reindex(prices.index).fillna(0.0)
-        px = prices.reindex(pos.index).fillna(0.0)
+        px = self._mark_prices(prices, pos)
         return float(self.cash + float((pos * px).sum()))
 
     def _avg_entry(self) -> pd.Series:
@@ -157,7 +179,7 @@ class PositionLedger:
         nav_val = self.nav(prices)
         unrealized = 0.0
         if not pos.empty:
-            px = prices.reindex(pos.index).fillna(0.0)
+            px = self._mark_prices(prices, pos)
             mkt = (pos * px).sum()
             unrealized = float(mkt - cb.reindex(pos.index).fillna(0.0).sum())
         return LedgerSnapshot(
@@ -232,14 +254,22 @@ class PositionLedger:
 
         rows: List[dict] = []
         for tk in all_tickers:
+            curr_shares = float(current[tk]) if tk in current.index else 0.0
             if tk not in prices_at_t.index:
+                if abs(curr_shares) > 1e-12:
+                    raise ValueError(
+                        f"Cannot size trade for held ticker {tk}: missing price."
+                    )
                 continue
             px = float(prices_at_t[tk])
             if not np.isfinite(px) or px <= 0:
+                if abs(curr_shares) > 1e-12:
+                    raise ValueError(
+                        f"Cannot size trade for held ticker {tk}: invalid price {px}."
+                    )
                 continue
             w_tgt = float(tw[tk]) if tk in tw.index else 0.0
             target_shares = (w_tgt * nav) / px
-            curr_shares = float(current[tk]) if tk in current.index else 0.0
             delta = target_shares - curr_shares
             if abs(delta) > 1e-10:
                 rows.append({"ticker": tk, "shares": delta})
@@ -283,50 +313,74 @@ class PositionLedger:
                 self.cash -= float(costs)
             return 0.0
 
-        for _, row in trades.iterrows():
-            tk = str(row["ticker"])
-            delta = float(row["shares"])
-            if abs(delta) < 1e-12:
-                continue
-            if tk not in prices_at_t.index:
-                logger.warning("No price for %s — skipping trade.", tk)
-                continue
-            px = float(prices_at_t[tk])
-            if not np.isfinite(px) or px <= 0:
-                logger.warning("Invalid price for %s — skipping.", tk)
-                continue
-
-            if delta > 0:
-                # Buy: new lot, spend cash
-                self._lots.setdefault(tk, []).append(
-                    Lot(ticker=tk, shares=delta, entry_price=px, entry_date=t)
+        # Snapshot so a mid-batch failure cannot leave a corrupted book.
+        cash_snap = self.cash
+        realized_snap = self.realized_pnl
+        txns_snap_len = len(self._txns)
+        lots_snap = {
+            tk: [
+                Lot(
+                    ticker=lot.ticker,
+                    shares=lot.shares,
+                    entry_price=lot.entry_price,
+                    entry_date=lot.entry_date,
                 )
-                cash_impact = -(delta * px)
-                self.cash += cash_impact
-                self._txns.append(_TxnRecord(
-                    t=t, ticker=tk, shares=delta, price=px,
-                    proceeds=cash_impact, realized_pnl=0.0, cost=0.0,
-                ))
-            else:
-                # Sell: FIFO consume lots
-                sell_shares = -delta
-                pnl = self._fifo_sell(tk, sell_shares, px)
-                batch_realized += pnl
-                self.realized_pnl += pnl
-                cash_impact = sell_shares * px
-                self.cash += cash_impact
-                self._txns.append(_TxnRecord(
-                    t=t, ticker=tk, shares=delta, price=px,
-                    proceeds=cash_impact, realized_pnl=pnl, cost=0.0,
-                ))
+                for lot in lots
+            ]
+            for tk, lots in self._lots.items()
+        }
 
-        if costs > 0:
-            self.cash -= float(costs)
-            # Attribute cost to a synthetic log row if needed
-            self._txns.append(_TxnRecord(
-                t=t, ticker="__COST__", shares=0.0, price=0.0,
-                proceeds=-float(costs), realized_pnl=0.0, cost=float(costs),
-            ))
+        try:
+            for _, row in trades.iterrows():
+                tk = str(row["ticker"])
+                delta = float(row["shares"])
+                if abs(delta) < 1e-12:
+                    continue
+                if tk not in prices_at_t.index:
+                    logger.warning("No price for %s — skipping trade.", tk)
+                    continue
+                px = float(prices_at_t[tk])
+                if not np.isfinite(px) or px <= 0:
+                    logger.warning("Invalid price for %s — skipping.", tk)
+                    continue
+
+                if delta > 0:
+                    # Buy: new lot, spend cash
+                    self._lots.setdefault(tk, []).append(
+                        Lot(ticker=tk, shares=delta, entry_price=px, entry_date=t)
+                    )
+                    cash_impact = -(delta * px)
+                    self.cash += cash_impact
+                    self._txns.append(_TxnRecord(
+                        t=t, ticker=tk, shares=delta, price=px,
+                        proceeds=cash_impact, realized_pnl=0.0, cost=0.0,
+                    ))
+                else:
+                    # Sell: FIFO consume lots
+                    sell_shares = -delta
+                    pnl = self._fifo_sell(tk, sell_shares, px)
+                    batch_realized += pnl
+                    self.realized_pnl += pnl
+                    cash_impact = sell_shares * px
+                    self.cash += cash_impact
+                    self._txns.append(_TxnRecord(
+                        t=t, ticker=tk, shares=delta, price=px,
+                        proceeds=cash_impact, realized_pnl=pnl, cost=0.0,
+                    ))
+
+            if costs > 0:
+                self.cash -= float(costs)
+                # Attribute cost to a synthetic log row if needed
+                self._txns.append(_TxnRecord(
+                    t=t, ticker="__COST__", shares=0.0, price=0.0,
+                    proceeds=-float(costs), realized_pnl=0.0, cost=float(costs),
+                ))
+        except Exception:
+            self.cash = cash_snap
+            self.realized_pnl = realized_snap
+            self._txns = self._txns[:txns_snap_len]
+            self._lots = lots_snap
+            raise
 
         logger.debug(
             "apply_trades: %d trades, realized_pnl=%.4f, cash=%.2f",
@@ -349,6 +403,13 @@ class PositionLedger:
             ValueError: If trying to sell more shares than held.
         """
         lots = self._lots.get(ticker, [])
+        held = sum(lot.shares for lot in lots)
+        if shares > held + 1e-8:
+            raise ValueError(
+                f"Cannot sell {shares} of {ticker}: "
+                f"insufficient shares (short by {shares - held:.6f})."
+            )
+
         remaining = shares
         pnl = 0.0
         while remaining > 1e-12 and lots:
@@ -360,11 +421,6 @@ class PositionLedger:
             if lot.shares <= 1e-12:
                 lots.pop(0)
 
-        if remaining > 1e-8:
-            raise ValueError(
-                f"Cannot sell {shares} of {ticker}: "
-                f"insufficient shares (short by {remaining:.6f})."
-            )
         # Clean empty
         if not lots:
             self._lots.pop(ticker, None)
@@ -379,11 +435,14 @@ class PositionLedger:
         Returns:
             Weight Series summing to ≤ 1 (cash is the residual).
             If NAV ≈ 0, returns empty Series.
+
+        Raises:
+            ValueError: If any open position lacks a valid mark price.
         """
         pos = self.positions()
         nav_val = self.nav(prices)
         if nav_val < 1e-10 or pos.empty:
             return pd.Series(dtype=float)
-        px = prices.reindex(pos.index).fillna(0.0)
+        px = self._mark_prices(prices, pos)
         values = pos * px
         return (values / nav_val).astype(float)

@@ -198,9 +198,14 @@ def get_rebalance_dates(
         n_days = int(m.group(1))
         if n_days < 1:
             raise ValueError(f"Invalid freq '{freq}': N must be >= 1.")
-        # First eligible index position with >= warmup history
-        # dates[i] has (i+1) rows with index <= dates[i]
-        start_idx = warmup - 1
+        # First eligible index position with >= warmup history.
+        # dates[i] has (i+1) rows with index <= dates[i].
+        # warmup=0 must start at index 0 (not -1): range(-1, ...) would
+        # prepend dates[-1] and make the schedule non-monotonic, collapsing
+        # OOS windows that key off the first rebalance date.
+        if warmup < 0:
+            raise ValueError(f"warmup must be >= 0, got {warmup}.")
+        start_idx = max(warmup - 1, 0)
         if start_idx >= len(dates):
             rebal_dates: list[pd.Timestamp] = []
         else:
